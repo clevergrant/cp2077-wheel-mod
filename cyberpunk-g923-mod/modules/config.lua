@@ -7,48 +7,57 @@ local Config = {
         -- Input settings
         steeringDeadzone = 0.05,
         steeringSensitivity = 1.0,
+        steeringCurve = "linear", -- "linear", "exponential", "s-curve"
         throttleDeadzone = 0.02,
         brakeDeadzone = 0.02,
-        
+        pedalCurve = "linear", -- "linear", "exponential"
+
         -- Force feedback settings
         forceFeedbackEnabled = true,
         forceFeedbackStrength = 0.8,
         roadFeedbackEnabled = true,
         collisionFeedbackEnabled = true,
-        
+        speedFeedbackEnabled = true,
+
         -- Vehicle control settings
         analogSteeringEnabled = true,
         smoothingEnabled = true,
         smoothingFactor = 0.1,
-        
+
+        -- Vehicle-specific settings
+        carSensitivity = 1.0,
+        motorcycleSensitivity = 1.2,
+        truckSensitivity = 0.8,
+
         -- Debug settings
         debugMode = false,
-        showInputValues = false
+        showInputValues = false,
+        showVehicleInfo = false
     }
 }
 
 -- Load configuration from file
 function Config:Load()
     print("[G923Mod] Loading configuration...")
-    
+
     -- Start with default settings
     self.settings = {}
     for key, value in pairs(self.defaultSettings) do
         self.settings[key] = value
     end
-    
+
     -- TODO: Load from JSON file when CET file I/O is available
     -- For now, use default settings
-    
+
     print("[G923Mod] Configuration loaded")
 end
 
 -- Save configuration to file
 function Config:Save()
     print("[G923Mod] Saving configuration...")
-    
+
     -- TODO: Save to JSON file when CET file I/O is available
-    
+
     print("[G923Mod] Configuration saved")
 end
 
