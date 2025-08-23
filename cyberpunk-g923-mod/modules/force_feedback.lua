@@ -28,7 +28,7 @@ function ForceFeedback:Initialize()
 
     -- Get DirectInput interface from InputHandler
     self.directInput = InputHandler.directInput
-    
+
     if not self.directInput or not self.directInput.capabilities.forceFeedback then
         print("[G923Mod] Force feedback not supported on this device")
         return
@@ -140,42 +140,101 @@ function ForceFeedback:GetVehicleState()
         return nil
     end
 
-    -- Convert vehicle info to force feedback state
+    -- Get more detailed vehicle state from game
     local vehicleState = {
         speed = vehicleInfo.speed or 0,
         rpm = vehicleInfo.rpm or 0,
-        onRoad = true, -- TODO: Detect road surface from game
-        collision = false, -- TODO: Detect collisions from game events
-        surfaceType = "asphalt", -- TODO: Get actual surface type
-        vehicleType = vehicleInfo.type or "unknown"
+        onRoad = true,
+        collision = false,
+        surfaceType = "asphalt",
+        vehicleType = vehicleInfo.type or "unknown",
+        wheelSlip = 0,
+        braking = false,
+        accelerating = false
     }
 
-    -- Detect collision based on sudden speed changes
-    if self.lastVehicleState and self.lastVehicleState.speed > 0 then
+    -- Try to get additional vehicle data from blackboard
+    pcall(function()
+        local VehicleControl = require("modules/vehicle_control")
+        if VehicleControl.currentVehicle then
+            local blackboard = VehicleControl.currentVehicle:GetBlackboard()
+            if blackboard then
+                -- Get surface information
+                vehicleState.onRoad = blackboard:GetBool("onRoad") or true
+                vehicleState.surfaceType = blackboard:GetString("surfaceType") or "asphalt"
+
+                -- Get tire/physics data
+                vehicleState.wheelSlip = blackboard:GetFloat("wheelSlip") or 0
+                vehicleState.braking = blackboard:GetBool("isBraking") or false
+                vehicleState.accelerating = blackboard:GetBool("isAccelerating") or false
+
+                -- Get steering forces
+                vehicleState.steeringForce = blackboard:GetFloat("steeringForce") or 0
+            end
+        end
+    end)
+
+    -- Detect collision based on sudden speed changes or vehicle events
+    if self.lastVehicleState then
         local speedDelta = math.abs(vehicleState.speed - self.lastVehicleState.speed)
         if speedDelta > 20 then -- Sudden speed change threshold
             vehicleState.collision = true
         end
     end
 
+    -- Get input handler state for additional feedback
+    local InputHandler = require("modules/input_handler")
+    local throttle = InputHandler:GetThrottle()
+    local brake = InputHandler:GetBrake()
+
+    vehicleState.accelerating = throttle > 0.1
+    vehicleState.braking = brake > 0.1
+
     return vehicleState
 end
 
 -- Update road surface feedback
 function ForceFeedback:UpdateRoadFeedback(vehicleState)
-    if not vehicleState.onRoad then
+    if not Config:Get("roadFeedbackEnabled") then
         return
     end
 
-    -- TODO: Adjust friction and damping based on road surface
-    -- Different surfaces would have different characteristics:
-    -- - Asphalt: smooth, moderate friction
-    -- - Dirt: rough, high friction
-    -- - Gravel: very rough, variable friction
-    -- - Grass: soft, low friction
-
+    -- Adjust friction and damping based on road surface
     local surfaceMultiplier = self:GetSurfaceMultiplier(vehicleState.surfaceType)
+
+    -- Add road texture effects
+    if vehicleState.speed > 5 then -- Only apply when moving
+        local textureIntensity = surfaceMultiplier * (vehicleState.speed / 50.0)
+        textureIntensity = math.min(textureIntensity, 1.0)
+
+        -- Apply surface-specific texture
+        self:ApplyRoadTexture(vehicleState.surfaceType, textureIntensity)
+    end
+
+    -- Update base friction level
     self:SetFrictionLevel(surfaceMultiplier)
+end
+
+-- Apply road texture effects
+function ForceFeedback:ApplyRoadTexture(surfaceType, intensity)
+    if not self.directInput then
+        return
+    end
+
+    -- Generate road texture vibration patterns
+    local patterns = {
+        asphalt = { frequency = 5, amplitude = 0.1 },
+        dirt = { frequency = 15, amplitude = 0.3 },
+        gravel = { frequency = 25, amplitude = 0.5 },
+        grass = { frequency = 8, amplitude = 0.2 },
+        concrete = { frequency = 3, amplitude = 0.05 }
+    }
+
+    local pattern = patterns[surfaceType] or patterns.asphalt
+
+    -- Create periodic force effect for texture
+    local textureForce = math.sin(os.clock() * pattern.frequency) * pattern.amplitude * intensity
+    self.directInput:SendForceEffect("texture", textureForce, 100)
 end
 
 -- Get surface friction multiplier

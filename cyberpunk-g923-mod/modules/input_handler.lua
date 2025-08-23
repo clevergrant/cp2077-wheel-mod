@@ -33,7 +33,7 @@ function InputHandler:Initialize()
 
     -- Initialize DirectInput system
     local directInputSuccess = self.directInput:Initialize()
-    
+
     -- Attempt to detect G923 wheel
     self:DetectWheel()
 
@@ -46,7 +46,7 @@ function InputHandler:DetectWheel()
 
     -- Use DirectInput to detect actual G923 wheel
     self.wheelConnected = self.directInput:IsConnected()
-    
+
     if self.wheelConnected then
         print("[G923Mod] G923 steering wheel detected via DirectInput")
     else
@@ -95,22 +95,22 @@ function InputHandler:ReadWheelInputs()
     -- Poll DirectInput device for current state
     if self.directInput:IsConnected() then
         local success = self.directInput:PollDevice()
-        
+
         if success then
             -- Get normalized inputs from DirectInput
             local normalizedInputs = self.directInput:GetNormalizedInputs()
-            
+
             -- Update current inputs with real wheel data
             self.currentInputs.steering = normalizedInputs.steering
             self.currentInputs.throttle = normalizedInputs.throttle
             self.currentInputs.brake = normalizedInputs.brake
             self.currentInputs.clutch = normalizedInputs.clutch
             self.currentInputs.buttons = normalizedInputs.buttons
-            
+
             return
         end
     end
-    
+
     -- Fallback: Use keyboard input for testing when DirectInput unavailable
     if Config:Get("debugMode") then
         -- Use keyboard input for testing (A/D for steering, W/S for throttle/brake)

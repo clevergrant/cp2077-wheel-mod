@@ -46,19 +46,176 @@ function Config:Load()
         self.settings[key] = value
     end
 
-    -- TODO: Load from JSON file when CET file I/O is available
-    -- For now, use default settings
+    -- Try to load from JSON file
+    local success = self:LoadFromFile()
+    if not success then
+        print("[G923Mod] Using default configuration")
+    end
 
     print("[G923Mod] Configuration loaded")
+end
+
+-- Load configuration from JSON file
+function Config:LoadFromFile()
+    local configPath = "mods/cyberpunk-g923-mod/config.json"
+
+    -- Try to read config file using CET file system access
+    local success, content = pcall(function()
+        -- CET provides file I/O through io operations
+        local file = io.open(configPath, "r")
+        if not file then
+            return nil
+        end
+
+        local content = file:read("*all")
+        file:close()
+        return content
+    end)
+
+    if not success or not content then
+        print("[G923Mod] No configuration file found at " .. configPath)
+        return false
+    end
+
+    -- Parse JSON content
+    local configData = self:ParseJSON(content)
+    if not configData then
+        print("[G923Mod] Failed to parse configuration file")
+        return false
+    end
+
+    -- Apply loaded settings
+    for key, value in pairs(configData) do
+        if self.defaultSettings[key] ~= nil then
+            self.settings[key] = value
+        end
+    end
+
+    print("[G923Mod] Configuration loaded from " .. configPath)
+    return true
 end
 
 -- Save configuration to file
 function Config:Save()
     print("[G923Mod] Saving configuration...")
 
-    -- TODO: Save to JSON file when CET file I/O is available
+    local success = self:SaveToFile()
+    if success then
+        print("[G923Mod] Configuration saved")
+    else
+        print("[G923Mod] Failed to save configuration")
+    end
+end
 
-    print("[G923Mod] Configuration saved")
+-- Save configuration to JSON file
+function Config:SaveToFile()
+    local configPath = "mods/cyberpunk-g923-mod/config.json"
+
+    -- Create JSON content
+    local jsonContent = self:ToJSON(self.settings)
+    if not jsonContent then
+        print("[G923Mod] Failed to serialize configuration")
+        return false
+    end
+
+    -- Write to file
+    local success = pcall(function()
+        -- Ensure directory exists
+        local dir = "mods/cyberpunk-g923-mod"
+        os.execute("mkdir \"" .. dir .. "\" 2>nul") -- Windows mkdir
+
+        local file = io.open(configPath, "w")
+        if not file then
+            error("Could not open file for writing")
+        end
+
+        file:write(jsonContent)
+        file:close()
+    end)
+
+    if success then
+        print("[G923Mod] Configuration saved to " .. configPath)
+        return true
+    else
+        print("[G923Mod] Failed to write configuration file")
+        return false
+    end
+end
+
+-- Simple JSON parser for configuration
+function Config:ParseJSON(jsonString)
+    -- Simple JSON parsing for our configuration needs
+    -- This is a basic implementation for CET compatibility
+
+    local success, result = pcall(function()
+        -- Remove whitespace and comments
+        local cleaned = jsonString:gsub("//.-\n", ""):gsub("%s+", " ")
+
+        -- Simple key-value parsing for our flat configuration
+        local config = {}
+
+        -- Parse simple key: value pairs
+        for key, value in cleaned:gmatch('"([^"]+)"%s*:%s*([^,}]+)') do
+            -- Parse different value types
+            if value == "true" then
+                config[key] = true
+            elseif value == "false" then
+                config[key] = false
+            elseif value:match('^".*"$') then
+                config[key] = value:sub(2, -2) -- Remove quotes
+            elseif value:match('^%-?%d+%.%d+$') then
+                config[key] = tonumber(value)
+            elseif value:match('^%-?%d+$') then
+                config[key] = tonumber(value)
+            else
+                config[key] = value
+            end
+        end
+
+        return config
+    end)
+
+    if success then
+        return result
+    else
+        return nil
+    end
+end
+
+-- Simple JSON serializer for configuration
+function Config:ToJSON(data)
+    local success, result = pcall(function()
+        local lines = {"{\n"}
+
+        for key, value in pairs(data) do
+            local valueStr
+            if type(value) == "string" then
+                valueStr = '"' .. value .. '"'
+            elseif type(value) == "boolean" then
+                valueStr = tostring(value)
+            elseif type(value) == "number" then
+                valueStr = tostring(value)
+            else
+                valueStr = '"' .. tostring(value) .. '"'
+            end
+
+            table.insert(lines, '  "' .. key .. '": ' .. valueStr .. ',\n')
+        end
+
+        -- Remove last comma and close
+        if #lines > 1 then
+            lines[#lines] = lines[#lines]:sub(1, -3) .. '\n' -- Remove last comma
+        end
+        table.insert(lines, "}")
+
+        return table.concat(lines)
+    end)
+
+    if success then
+        return result
+    else
+        return nil
+    end
 end
 
 -- Get a configuration value
