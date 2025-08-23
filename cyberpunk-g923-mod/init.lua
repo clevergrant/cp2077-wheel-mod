@@ -2,7 +2,7 @@
 -- Main initialization script for Cyber Engine Tweaks
 
 local G923Mod = {
-    version = "1.0.0",
+    version = "2.0.0", -- Phase 3 with DirectInput and deep vehicle integration
     name = "G923 Steering Wheel Support",
     initialized = false
 }
@@ -11,6 +11,7 @@ local G923Mod = {
 local InputHandler = require("modules/input_handler")
 local VehicleControl = require("modules/vehicle_control")
 local ForceFeedback = require("modules/force_feedback")
+local VehicleInputOverride = require("modules/vehicle_input_override")
 local Config = require("modules/config")
 
 -- Initialize the mod
@@ -24,17 +25,20 @@ function G923Mod:Initialize()
     -- Load configuration
     Config:Load()
 
-    -- Initialize input handler
+    -- Initialize input handler (includes DirectInput)
     InputHandler:Initialize()
 
     -- Initialize vehicle control system
     VehicleControl:Initialize()
 
+    -- Initialize advanced vehicle input override
+    VehicleInputOverride:Initialize()
+
     -- Initialize force feedback
     ForceFeedback:Initialize()
 
     self.initialized = true
-    print("[G923Mod] Initialization complete")
+    print("[G923Mod] Phase 3 initialization complete - DirectInput and vehicle override active")
 end
 
 -- Update function called every frame
@@ -58,6 +62,7 @@ function G923Mod:Shutdown()
 
     print("[G923Mod] Shutting down G923 Steering Wheel Mod")
 
+    VehicleInputOverride:Shutdown()
     ForceFeedback:Shutdown()
     VehicleControl:Shutdown()
     InputHandler:Shutdown()
@@ -113,10 +118,40 @@ function G923Mod:RegisterConsoleCommands()
 
         _G.g923_status = function()
             print("[G923Mod] === G923 Mod Status ===")
+            print("  Version: " .. G923Mod.version)
             print("  Initialized: " .. tostring(G923Mod.initialized))
             print("  Wheel Connected: " .. tostring(InputHandler:IsWheelConnected()))
             print("  In Vehicle: " .. tostring(VehicleControl.inVehicle))
+            print("  Input Override Active: " .. tostring(VehicleInputOverride:IsActive()))
             print("  Debug Mode: " .. tostring(Config:Get("debugMode")))
+        end
+        
+        _G.g923_force_feedback = function(enabled)
+            if enabled == nil then enabled = true end
+            ForceFeedback:SetEnabled(enabled)
+        end
+        
+        _G.g923_override = function(enabled)
+            if enabled == nil then enabled = true end
+            VehicleInputOverride:SetActive(enabled)
+        end
+        
+        _G.g923_curve = function(curveType)
+            if curveType then
+                if curveType == "linear" or curveType == "exponential" or curveType == "s-curve" then
+                    Config:Set("steeringCurve", curveType)
+                    print("[G923Mod] Steering curve set to " .. curveType)
+                else
+                    print("[G923Mod] Invalid curve type. Use: linear, exponential, s-curve")
+                end
+            else
+                print("[G923Mod] Current steering curve: " .. Config:Get("steeringCurve"))
+            end
+        end
+        
+        _G.g923_test_effects = function()
+            print("[G923Mod] Testing force feedback effects...")
+            ForceFeedback:TriggerCollisionEffect()
         end
     end)
 end

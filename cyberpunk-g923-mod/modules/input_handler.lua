@@ -2,6 +2,7 @@
 -- Handles detection and processing of G923 wheel inputs
 
 local Config = require("modules/config")
+local DirectInput = require("modules/directinput")
 
 local InputHandler = {
     wheelConnected = false,
@@ -13,7 +14,7 @@ local InputHandler = {
         buttons = {}         -- Table of button states
     },
     lastInputs = {},
-    inputDevice = nil
+    directInput = DirectInput
 }
 
 -- Initialize input handler
@@ -30,6 +31,9 @@ function InputHandler:Initialize()
         end
     end
 
+    -- Initialize DirectInput system
+    local directInputSuccess = self.directInput:Initialize()
+    
     -- Attempt to detect G923 wheel
     self:DetectWheel()
 
@@ -40,19 +44,18 @@ end
 function InputHandler:DetectWheel()
     print("[G923Mod] Attempting to detect G923 steering wheel...")
 
-    -- TODO: Implement DirectInput or SDL2 integration
-    -- For now, simulate wheel detection
-    -- In a real implementation, this would:
-    -- 1. Enumerate DirectInput devices
-    -- 2. Look for Logitech G923 VID/PID
-    -- 3. Initialize device communication
-
-    -- Placeholder detection
-    self.wheelConnected = true
-    print("[G923Mod] G923 steering wheel detected (placeholder)")
-
-    if not self.wheelConnected then
+    -- Use DirectInput to detect actual G923 wheel
+    self.wheelConnected = self.directInput:IsConnected()
+    
+    if self.wheelConnected then
+        print("[G923Mod] G923 steering wheel detected via DirectInput")
+    else
         print("[G923Mod] Warning: G923 steering wheel not found")
+        -- Fallback to simulation mode for testing
+        if Config:Get("debugMode") then
+            print("[G923Mod] Using simulation mode for testing")
+            self.wheelConnected = true
+        end
     end
 end
 
@@ -87,20 +90,28 @@ function InputHandler:Update(deltaTime)
     end
 end
 
--- Read raw inputs from wheel (placeholder implementation)
+-- Read raw inputs from wheel (DirectInput implementation)
 function InputHandler:ReadWheelInputs()
-    -- TODO: Replace with actual DirectInput/SDL2 calls
-    -- This is a placeholder that would be replaced with:
-    -- local device = GetDirectInputDevice(G923_VID, G923_PID)
-    -- local state = device:GetState()
-    -- self.currentInputs.steering = NormalizeAxis(state.lX, -32768, 32767)
-    -- etc.
-
-    -- Placeholder: simulate some input variation for testing
-    -- In real implementation, these would come from the actual wheel
-
-    -- For now, we can use CET's input system as a fallback for testing
-    -- This allows testing the vehicle control logic without actual wheel hardware
+    -- Poll DirectInput device for current state
+    if self.directInput:IsConnected() then
+        local success = self.directInput:PollDevice()
+        
+        if success then
+            -- Get normalized inputs from DirectInput
+            local normalizedInputs = self.directInput:GetNormalizedInputs()
+            
+            -- Update current inputs with real wheel data
+            self.currentInputs.steering = normalizedInputs.steering
+            self.currentInputs.throttle = normalizedInputs.throttle
+            self.currentInputs.brake = normalizedInputs.brake
+            self.currentInputs.clutch = normalizedInputs.clutch
+            self.currentInputs.buttons = normalizedInputs.buttons
+            
+            return
+        end
+    end
+    
+    -- Fallback: Use keyboard input for testing when DirectInput unavailable
     if Config:Get("debugMode") then
         -- Use keyboard input for testing (A/D for steering, W/S for throttle/brake)
         local steering = 0.0
@@ -280,7 +291,10 @@ end
 function InputHandler:Shutdown()
     print("[G923Mod] Shutting down input handler...")
 
-    -- TODO: Clean up DirectInput resources
+    -- Clean up DirectInput resources
+    if self.directInput then
+        self.directInput:Shutdown()
+    end
 
     self.wheelConnected = false
     print("[G923Mod] Input handler shutdown complete")

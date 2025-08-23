@@ -7,6 +7,7 @@ local InputHandler = require("modules/input_handler")
 local ForceFeedback = {
     initialized = false,
     effectsEnabled = false,
+    directInput = nil,
     currentEffects = {},
     lastVehicleState = {
         speed = 0,
@@ -25,11 +26,13 @@ function ForceFeedback:Initialize()
         return
     end
 
-    -- TODO: Initialize DirectInput force feedback
-    -- This would involve:
-    -- 1. Getting the force feedback device interface
-    -- 2. Setting up effect parameters
-    -- 3. Creating base effects (spring, damper, friction)
+    -- Get DirectInput interface from InputHandler
+    self.directInput = InputHandler.directInput
+    
+    if not self.directInput or not self.directInput.capabilities.forceFeedback then
+        print("[G923Mod] Force feedback not supported on this device")
+        return
+    end
 
     self.effectsEnabled = Config:Get("forceFeedbackEnabled")
     self.initialized = true
@@ -44,8 +47,7 @@ end
 
 -- Create base force feedback effects
 function ForceFeedback:CreateBaseEffects()
-    -- TODO: Create DirectInput force feedback effects
-    -- Base effects would include:
+    -- Create DirectInput force feedback effects using the DirectInput interface
 
     -- 1. Spring effect (centering force)
     self:CreateSpringEffect()
@@ -62,38 +64,37 @@ end
 
 -- Create spring centering effect
 function ForceFeedback:CreateSpringEffect()
-    -- TODO: Implement DirectInput spring effect
-    -- Parameters:
-    -- - Coefficient: strength of centering force
-    -- - Saturation: maximum force level
-    -- - Dead band: area around center with no force
-
-    print("[G923Mod] Created spring centering effect")
+    if self.directInput then
+        local strength = Config:Get("forceFeedbackStrength") * 0.5 -- Base centering strength
+        self.directInput:CreateSpringEffect(strength)
+        print("[G923Mod] Created spring centering effect")
+    end
 end
 
 -- Create damper resistance effect
 function ForceFeedback:CreateDamperEffect()
-    -- TODO: Implement DirectInput damper effect
-    -- Parameters:
-    -- - Coefficient: resistance to movement
-    -- - Saturation: maximum damping force
-
-    print("[G923Mod] Created damper resistance effect")
+    if self.directInput then
+        local strength = Config:Get("forceFeedbackStrength") * 0.3 -- Base damping strength
+        self.directInput:CreateDamperEffect(strength)
+        print("[G923Mod] Created damper resistance effect")
+    end
 end
 
 -- Create friction road surface effect
 function ForceFeedback:CreateFrictionEffect()
-    -- TODO: Implement DirectInput friction effect
-    -- Parameters:
-    -- - Coefficient: friction strength
-    -- - Saturation: maximum friction force
-
-    print("[G923Mod] Created friction road surface effect")
+    if self.directInput then
+        local strength = Config:Get("forceFeedbackStrength") * 0.4 -- Base friction strength
+        self.directInput:CreateFrictionEffect(strength)
+        print("[G923Mod] Created friction road surface effect")
+    end
 end
 
 -- Create impact collision effects
 function ForceFeedback:CreateImpactEffects()
-    -- TODO: Create various impact effects
+    -- Impact effects are created on-demand during collisions
+    -- This just prepares the system for impact feedback
+    print("[G923Mod] Impact collision effects ready")
+end
     -- - Light collision
     -- - Heavy collision
     -- - Explosion nearby
@@ -216,8 +217,10 @@ end
 
 -- Set friction level
 function ForceFeedback:SetFrictionLevel(level)
-    -- TODO: Update DirectInput friction effect
-    -- Adjust the coefficient of the friction effect
+    if self.directInput then
+        local adjustedLevel = level * Config:Get("forceFeedbackStrength")
+        self.directInput:CreateFrictionEffect(adjustedLevel)
+    end
 
     if Config:Get("debugMode") then
         print(string.format("[G923Mod] Setting friction level: %.2f", level))
@@ -226,8 +229,10 @@ end
 
 -- Set damping level
 function ForceFeedback:SetDampingLevel(level)
-    -- TODO: Update DirectInput damper effect
-    -- Adjust the coefficient of the damper effect
+    if self.directInput then
+        local adjustedLevel = level * Config:Get("forceFeedbackStrength")
+        self.directInput:CreateDamperEffect(adjustedLevel)
+    end
 
     if Config:Get("debugMode") then
         print(string.format("[G923Mod] Setting damping level: %.2f", level))
@@ -236,8 +241,11 @@ end
 
 -- Set vibration level
 function ForceFeedback:SetVibrationLevel(level)
-    -- TODO: Create periodic vibration effect
-    -- This could be a sine wave or random vibration
+    if self.directInput then
+        local adjustedLevel = level * Config:Get("forceFeedbackStrength")
+        -- Use a short duration impact effect for vibration simulation
+        self.directInput:CreateImpactEffect(adjustedLevel, 100) -- 100ms vibration
+    end
 
     if Config:Get("debugMode") then
         print(string.format("[G923Mod] Setting vibration level: %.2f", level))
@@ -246,7 +254,10 @@ end
 
 -- Trigger collision impact effect
 function ForceFeedback:TriggerCollisionEffect()
-    -- TODO: Play collision impact effect
+    if self.directInput then
+        local impactStrength = Config:Get("forceFeedbackStrength") * 0.8
+        self.directInput:CreateImpactEffect(impactStrength, 300) -- 300ms impact
+    end
     -- This would be a short, strong force pulse
 
     print("[G923Mod] Collision impact feedback triggered")
@@ -266,7 +277,9 @@ end
 
 -- Stop all active effects
 function ForceFeedback:StopAllEffects()
-    -- TODO: Stop all DirectInput effects
+    if self.directInput then
+        self.directInput:StopAllEffects()
+    end
 
     print("[G923Mod] All force feedback effects stopped")
 end

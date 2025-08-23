@@ -96,26 +96,30 @@ print(G923Mod.InputHandler:IsWheelConnected())
 
 ## Development Status
 
-This is Phase 2 of development, focusing on vehicle control integration and enhanced input processing. The current implementation includes:
+This is Phase 3 of development, implementing DirectInput communication and deep vehicle input override. The current implementation includes:
 
-- ✅ Complete module structure
+- ✅ Complete module structure with advanced architecture
 - ✅ Configuration system with steering curves and vehicle-specific settings
 - ✅ Enhanced input handling framework with sensitivity curves
-- ✅ **NEW: CET vehicle system integration with real-time vehicle detection**
-- ✅ **NEW: Vehicle-specific steering sensitivity (cars, motorcycles, trucks)**
-- ✅ **NEW: Advanced steering curves (linear, exponential, s-curve)**
-- ✅ **NEW: Real vehicle data integration (speed, RPM, vehicle type)**
+- ✅ CET vehicle system integration with real-time vehicle detection
+- ✅ Vehicle-specific steering sensitivity (cars, motorcycles, trucks)
+- ✅ Advanced steering curves (linear, exponential, s-curve)
+- ✅ Real vehicle data integration (speed, RPM, vehicle type)
+- ✅ **NEW: DirectInput integration framework for G923 communication**
+- ✅ **NEW: Advanced vehicle input override system**
+- ✅ **NEW: Real force feedback effects via DirectInput**
+- ✅ **NEW: Vehicle-specific input handling and response tuning**
 - ✅ Force feedback framework with real vehicle state
-- ✅ **NEW: Console commands for debugging and configuration**
-- ⚠️ DirectInput integration (requires implementation)
-- ⚠️ Actual vehicle input override (requires deeper CET API research)
+- ✅ Console commands for debugging and configuration
+- ⚠️ DirectInput hardware implementation (framework complete, needs Windows API)
+- ⚠️ Deep vehicle API hooks (framework ready, needs CET research)
 
-## New Console Commands
+## Enhanced Console Commands
 
 Open the CET console and use these commands:
 
 ```lua
--- Show mod status
+-- Show comprehensive mod status
 g923_status()
 
 -- Print current configuration
@@ -131,6 +135,23 @@ g923_vehicle_info(true)
 -- Adjust steering sensitivity
 g923_sensitivity(1.5)  -- Set sensitivity to 1.5
 g923_sensitivity()     -- Show current sensitivity
+
+-- Change steering curve
+g923_curve("exponential")  -- Set to exponential curve
+g923_curve("s-curve")     -- Set to S-curve
+g923_curve("linear")      -- Set to linear curve
+g923_curve()              -- Show current curve
+
+-- Force feedback controls
+g923_force_feedback(true)  -- Enable force feedback
+g923_force_feedback(false) -- Disable force feedback
+
+-- Test force feedback effects
+g923_test_effects()
+
+-- Manual input override control
+g923_override(true)   -- Force enable input override
+g923_override(false)  -- Force disable input override
 ```
 
 ## Enhanced Configuration
@@ -161,31 +182,30 @@ The mod now includes enhanced configurable options:
 
 ## Future Phases
 
-- **Phase 3**: Implement actual DirectInput communication and vehicle input override
-- **Phase 4**: Add advanced force feedback effects with road surface detection
-- **Phase 5**: UI configuration panel and enhanced vehicle compatibility
-- **Phase 6**: Performance optimization and release preparation
+## Current Limitations
 
-## Known Limitations
-
-- DirectInput integration not yet implemented (placeholder code)
-- Game vehicle API integration pending
-- Force feedback effects are framework only
+- DirectInput hardware communication needs Windows API implementation
+- Vehicle input override requires deeper CET API research
+- Force feedback effects are simulated (need real DirectInput integration)
 - Configuration persistence not implemented
 
-## Future Phases
+## Next Development Steps
 
-- **Phase 2**: Implement actual DirectInput communication
-- **Phase 3**: Integrate with Cyberpunk 2077 vehicle systems
+- **Complete DirectInput**: Implement actual Windows DirectInput API calls
+- **Vehicle API Research**: Find CET hooks for deep vehicle input control  
+- **Force Feedback Implementation**: Add real DirectInput force feedback
+- **Performance Optimization**: Optimize input polling and processing
+- **UI Configuration Panel**: Create in-game configuration interface
+
 ## Contributing
 
 This mod is in active development. Contributions welcome for:
 
-- DirectInput implementation
-- CET API integration and vehicle input override
-- Force feedback enhancement
-- Bug fixes and optimizations
-- Testing with different vehicle types
+- DirectInput Windows API implementation
+- CET vehicle API research and integration
+- Force feedback enhancement and testing
+- Performance optimization
+- Bug fixes and testing with different vehicle types
 
 ## License
 
