@@ -1,0 +1,50 @@
+# Cyberpunk 2077 G923 Steering Wheel Mod - Git Ignore
+
+# CET (Cyber Engine Tweaks) specific
+*.log
+*.tmp
+
+# Lua compiled files
+*.luac
+
+# VS Code workspace files
+.vscode/
+*.code-workspace
+
+# Windows specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS specific
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Configuration overrides (keep default configs)
+config_user.lua
+settings_local.lua
+
+# Development and testing
+test/
+debug/
+temp/
+
+# Documentation build artifacts
+docs/_build/
+docs/.doctrees/
+
+# IDE files
+*.swp
+*.swo
+*~
+
+# Runtime logs and crash dumps
+crash_*.dmp
+error_*.log
