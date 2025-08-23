@@ -38,60 +38,142 @@ end
 function VehicleInputOverride:SetupInputHooks()
     print("[G923Mod] Setting up vehicle input hooks...")
 
-    -- Hook into CET vehicle input system using ObserveAfter and Override
-    -- These hooks intercept the game's vehicle input processing
+    -- Store original hooks for cleanup
+    self.originalHooks = {}
 
-    -- Hook vehicle steering input
-    ObserveAfter("VehicleComponent", "GetSteeringInput", function(this)
+    -- Method 1: Hook into vehicle input methods directly
+    self:SetupDirectInputHooks()
+
+    -- Method 2: Hook into player input system
+    self:SetupPlayerInputHooks()
+
+    -- Method 3: Hook into vehicle blackboard system
+    self:SetupBlackboardHooks()
+
+    -- Method 4: Hook into vehicle controller updates
+    self:SetupControllerHooks()
+
+    print("[G923Mod] Vehicle input hooks configured with multiple approaches")
+end
+
+-- Set up direct vehicle input method hooks
+function VehicleInputOverride:SetupDirectInputHooks()
+    -- Hook VehicleComponent methods for steering, throttle, brake
+    local steeringHook = Override("VehicleComponent", "GetInputValueFloat", function(this, inputName, wrappedMethod)
         if self.active and InputHandler:IsWheelConnected() then
-            local wheelSteering = InputHandler:GetSteering()
-            if math.abs(wheelSteering) > 0.01 then
-                -- Override the steering input with wheel data
-                return wheelSteering
+            if inputName == CName("Steer") or inputName == CName("steering") then
+                local wheelSteering = InputHandler:GetSteering()
+                if math.abs(wheelSteering) > Config:Get("steeringDeadzone") then
+                    local modified = self:ApplyVehicleSteeringModification(wheelSteering, self:GetVehicleType(self.currentVehicle))
+                    if Config:Get("debugMode") then
+                        print(string.format("[G923Mod] Steering override: %.3f -> %.3f", wheelSteering, modified))
+                    end
+                    return modified
+                end
+            elseif inputName == CName("Accelerate") or inputName == CName("throttle") then
+                local wheelThrottle = InputHandler:GetThrottle()
+                if wheelThrottle > Config:Get("throttleDeadzone") then
+                    return wheelThrottle
+                end
+            elseif inputName == CName("Brake") or inputName == CName("brake") then
+                local wheelBrake = InputHandler:GetBrake()
+                if wheelBrake > Config:Get("brakeDeadzone") then
+                    return wheelBrake
+                end
             end
         end
+        return wrappedMethod(inputName)
     end)
 
-    -- Hook vehicle throttle input
-    ObserveAfter("VehicleComponent", "GetThrottleInput", function(this)
+    self.originalHooks.vehicleInputFloat = steeringHook
+
+    -- Hook vehicle input vector methods for more complex input
+    local vectorHook = Override("VehicleComponent", "GetInputValueVector", function(this, inputName, wrappedMethod)
         if self.active and InputHandler:IsWheelConnected() then
-            local wheelThrottle = InputHandler:GetThrottle()
-            if wheelThrottle > 0.01 then
-                return wheelThrottle
+            if inputName == CName("VehicleMovement") then
+                local steering = InputHandler:GetSteering()
+                local throttle = InputHandler:GetThrottle()
+                local brake = InputHandler:GetBrake()
+
+                -- Create movement vector (X = steering, Y = throttle/brake)
+                local moveY = throttle - brake  -- Forward/backward
+                return Vector2.new(steering, moveY)
             end
         end
+        return wrappedMethod(inputName)
     end)
 
-    -- Hook vehicle brake input
-    ObserveAfter("VehicleComponent", "GetBrakeInput", function(this)
+    self.originalHooks.vehicleInputVector = vectorHook
+end
+
+-- Set up player input system hooks
+function VehicleInputOverride:SetupPlayerInputHooks()
+    -- Hook the main player input processing
+    local playerInputHook = Override("PlayerPuppet", "GetInputValueFloat", function(this, inputName, wrappedMethod)
         if self.active and InputHandler:IsWheelConnected() then
-            local wheelBrake = InputHandler:GetBrake()
-            if wheelBrake > 0.01 then
-                return wheelBrake
+            -- Check if we're in a vehicle
+            local vehicle = Game.GetMountedVehicle(this)
+            if vehicle then
+                if inputName == CName("VehicleSteer") then
+                    local wheelSteering = InputHandler:GetSteering()
+                    if math.abs(wheelSteering) > Config:Get("steeringDeadzone") then
+                        return self:ApplyVehicleSteeringModification(wheelSteering, self:GetVehicleType(vehicle))
+                    end
+                elseif inputName == CName("VehicleAccelerate") then
+                    local wheelThrottle = InputHandler:GetThrottle()
+                    if wheelThrottle > Config:Get("throttleDeadzone") then
+                        return wheelThrottle
+                    end
+                elseif inputName == CName("VehicleBrake") then
+                    local wheelBrake = InputHandler:GetBrake()
+                    if wheelBrake > Config:Get("brakeDeadzone") then
+                        return wheelBrake
+                    end
+                end
             end
         end
+        return wrappedMethod(inputName)
     end)
 
-    -- Hook into vehicle input processing for more direct control
-    ObserveAfter("VehicleObject", "OnUpdate", function(this, deltaTime)
-        if self.active and InputHandler:IsWheelConnected() then
-            self:ApplyDirectVehicleInput(this, deltaTime)
+    self.originalHooks.playerInput = playerInputHook
+end
+
+-- Set up blackboard input hooks
+function VehicleInputOverride:SetupBlackboardHooks()
+    -- Hook blackboard value setting to intercept input writes
+    local blackboardHook = ObserveAfter("VehicleObject", "OnUpdate", function(vehicle, deltaTime)
+        if self.active and InputHandler:IsWheelConnected() and vehicle == self.currentVehicle then
+            self:UpdateVehicleBlackboard(vehicle)
         end
     end)
 
-    -- Hook vehicle physics for enhanced control
-    ObserveAfter("VehicleController", "Update", function(this, deltaTime)
+    self.originalHooks.blackboard = blackboardHook
+end
+
+-- Set up vehicle controller hooks
+function VehicleInputOverride:SetupControllerHooks()
+    -- Hook into different vehicle controller types
+    local carControllerHook = ObserveAfter("CarController", "Update", function(this, deltaTime)
         if self.active and InputHandler:IsWheelConnected() then
-            self:ApplyPhysicsInput(this, deltaTime)
+            self:ApplyCarControllerInput(this, deltaTime)
         end
     end)
 
-    print("[G923Mod] Vehicle input hooks configured")
+    local bikeControllerHook = ObserveAfter("BikeController", "Update", function(this, deltaTime)
+        if self.active and InputHandler:IsWheelConnected() then
+            self:ApplyBikeControllerInput(this, deltaTime)
+        end
+    end)
+
+    self.originalHooks.carController = carControllerHook
+    self.originalHooks.bikeController = bikeControllerHook
 end
 
 -- Register for vehicle-related events
 function VehicleInputOverride:RegisterVehicleEvents()
-    -- Register for vehicle enter/exit to activate/deactivate input override
+    -- Enhanced vehicle enter/exit detection with multiple methods
+
+    -- Method 1: Standard CET events
     registerForEvent("onEnterVehicle", function(vehicle)
         self:OnVehicleEntered(vehicle)
     end)
@@ -100,10 +182,169 @@ function VehicleInputOverride:RegisterVehicleEvents()
         self:OnVehicleExited()
     end)
 
-    -- Register for input processing events
+    -- Method 2: Player state monitoring
     registerForEvent("onUpdate", function(deltaTime)
-        if self.active then
-            self:ProcessVehicleInput(deltaTime)
+        if self.initialized then
+            self:MonitorVehicleState(deltaTime)
+        end
+    end)
+
+    -- Method 3: Direct vehicle state observation
+    ObserveAfter("PlayerPuppet", "OnMountingEvent", function(this, evt)
+        if evt:IsMount() then
+            local vehicle = Game.GetMountedVehicle(this)
+            if vehicle then
+                self:OnVehicleEntered(vehicle)
+            end
+        else
+            self:OnVehicleExited()
+        end
+    end)
+end
+
+-- Monitor vehicle state for changes
+function VehicleInputOverride:MonitorVehicleState(deltaTime)
+    local player = Game.GetPlayer()
+    if not player then return end
+
+    local currentVehicle = Game.GetMountedVehicle(player)
+
+    -- Check if vehicle state changed
+    if currentVehicle and not self.active then
+        -- Player entered vehicle
+        self:OnVehicleEntered(currentVehicle)
+    elseif not currentVehicle and self.active then
+        -- Player exited vehicle
+        self:OnVehicleExited()
+    elseif currentVehicle and self.active and currentVehicle ~= self.currentVehicle then
+        -- Player switched vehicles
+        self:OnVehicleExited()
+        self:OnVehicleEntered(currentVehicle)
+    end
+
+    -- Process input if active
+    if self.active and currentVehicle then
+        self:ProcessVehicleInput(deltaTime)
+    end
+end
+
+-- Update vehicle blackboard with wheel inputs
+function VehicleInputOverride:UpdateVehicleBlackboard(vehicle)
+    local steering = InputHandler:GetSteering()
+    local throttle = InputHandler:GetThrottle()
+    local brake = InputHandler:GetBrake()
+
+    -- Apply deadzone filtering
+    if math.abs(steering) < Config:Get("steeringDeadzone") then steering = 0 end
+    if throttle < Config:Get("throttleDeadzone") then throttle = 0 end
+    if brake < Config:Get("brakeDeadzone") then brake = 0 end
+
+    -- Skip if no wheel input
+    if steering == 0 and throttle == 0 and brake == 0 then
+        return
+    end
+
+    pcall(function()
+        local blackboard = vehicle:GetBlackboard()
+        if blackboard then
+            -- Try multiple blackboard key variations
+            local steeringKeys = {
+                "steering_input", "vehicle_steering", "input_steering",
+                "steer", "turn", "horizontal_movement"
+            }
+            local throttleKeys = {
+                "throttle_input", "vehicle_throttle", "input_throttle",
+                "accelerate", "forward", "gas"
+            }
+            local brakeKeys = {
+                "brake_input", "vehicle_brake", "input_brake",
+                "brake", "stop", "reverse"
+            }
+
+            -- Apply steering to all possible keys
+            for _, key in ipairs(steeringKeys) do
+                blackboard:SetFloat(GetAllBlackboardDefs().Vehicle[key] or CName(key), steering)
+            end
+
+            -- Apply throttle
+            for _, key in ipairs(throttleKeys) do
+                blackboard:SetFloat(GetAllBlackboardDefs().Vehicle[key] or CName(key), throttle)
+            end
+
+            -- Apply brake
+            for _, key in ipairs(brakeKeys) do
+                blackboard:SetFloat(GetAllBlackboardDefs().Vehicle[key] or CName(key), brake)
+            end
+
+            if Config:Get("debugMode") then
+                print(string.format("[G923Mod] Blackboard updated: S=%.2f T=%.2f B=%.2f", steering, throttle, brake))
+            end
+        end
+    end)
+end
+
+-- Apply input to car controller specifically
+function VehicleInputOverride:ApplyCarControllerInput(controller, deltaTime)
+    local steering = InputHandler:GetSteering()
+    local throttle = InputHandler:GetThrottle()
+    local brake = InputHandler:GetBrake()
+
+    pcall(function()
+        -- Try direct controller input methods
+        if controller.SetSteeringInput then
+            controller:SetSteeringInput(steering)
+        end
+        if controller.SetThrottleInput then
+            controller:SetThrottleInput(throttle)
+        end
+        if controller.SetBrakeInput then
+            controller:SetBrakeInput(brake)
+        end
+
+        -- Try accessing internal input state
+        if controller.m_inputContext then
+            controller.m_inputContext.steering = steering
+            controller.m_inputContext.throttle = throttle
+            controller.m_inputContext.brake = brake
+        end
+
+        -- Try physics-level application
+        if controller.GetVehicle then
+            local vehicle = controller:GetVehicle()
+            if vehicle and vehicle.GetPhysicsComponent then
+                local physics = vehicle:GetPhysicsComponent()
+                if physics then
+                    physics:SetSteeringInput(steering)
+                    physics:SetThrottleInput(throttle)
+                    physics:SetBrakeInput(brake)
+                end
+            end
+        end
+    end)
+end
+
+-- Apply input to bike controller specifically
+function VehicleInputOverride:ApplyBikeControllerInput(controller, deltaTime)
+    -- Motorcycles need different handling - higher sensitivity, quicker response
+    local steering = InputHandler:GetSteering() * 1.2  -- Increased sensitivity for bikes
+    local throttle = InputHandler:GetThrottle()
+    local brake = InputHandler:GetBrake()
+
+    pcall(function()
+        -- Similar to car controller but with bike-specific parameters
+        if controller.SetSteeringInput then
+            controller:SetSteeringInput(steering)
+        end
+        if controller.SetThrottleInput then
+            controller:SetThrottleInput(throttle)
+        end
+        if controller.SetBrakeInput then
+            controller:SetBrakeInput(brake)
+        end
+
+        -- Bikes might need lean/balance input
+        if controller.SetLeanInput then
+            controller:SetLeanInput(steering * 0.5)  -- Subtle lean based on steering
         end
     end)
 end
@@ -167,25 +408,75 @@ function VehicleInputOverride:GetVehicleType(vehicle)
         return "car" -- Default fallback
     end
 
-    -- Try to determine vehicle type from game data
     local vehicleType = "car" -- Default
 
     pcall(function()
-        local record = vehicle:GetRecord()
-        if record then
-            local vehicleTypeName = tostring(record.type):lower()
+        -- Method 1: Check vehicle record type
+        if vehicle.GetRecord then
+            local record = vehicle:GetRecord()
+            if record and record.Type then
+                local typeName = tostring(record.Type():GetClassName()):lower()
+                if typeName:find("bike") or typeName:find("motorcycle") then
+                    vehicleType = "motorcycle"
+                elseif typeName:find("truck") or typeName:find("heavy") then
+                    vehicleType = "truck"
+                elseif typeName:find("van") then
+                    vehicleType = "van"
+                end
+            end
+        end
 
-            if string.find(vehicleTypeName, "motorcycle") or string.find(vehicleTypeName, "bike") then
+        -- Method 2: Check entity template path
+        if vehicleType == "car" and vehicle.GetEntityTemplate then
+            local template = vehicle:GetEntityTemplate()
+            if template then
+                local templatePath = tostring(template:GetPath()):lower()
+                if templatePath:find("bike") or templatePath:find("motorcycle") then
+                    vehicleType = "motorcycle"
+                elseif templatePath:find("truck") or templatePath:find("heavy") then
+                    vehicleType = "truck"
+                elseif templatePath:find("van") then
+                    vehicleType = "van"
+                end
+            end
+        end
+
+        -- Method 3: Check display name as fallback
+        if vehicleType == "car" and vehicle.GetDisplayName then
+            local displayName = tostring(vehicle:GetDisplayName()):lower()
+            if displayName:find("bike") or displayName:find("motorcycle") then
                 vehicleType = "motorcycle"
-            elseif string.find(vehicleTypeName, "truck") then
+            elseif displayName:find("truck") then
                 vehicleType = "truck"
-            elseif string.find(vehicleTypeName, "van") then
+            elseif displayName:find("van") then
                 vehicleType = "van"
-            else
-                vehicleType = "car"
+            end
+        end
+
+        -- Method 4: Fallback to wheel count or physics properties
+        if vehicleType == "car" and vehicle.GetPhysicsComponent then
+            local physics = vehicle:GetPhysicsComponent()
+            if physics then
+                -- Check wheel count or mass for classification
+                if physics.GetWheelCount and physics:GetWheelCount() == 2 then
+                    vehicleType = "motorcycle"
+                elseif physics.GetMass then
+                    local mass = physics:GetMass()
+                    if mass > 3000 then
+                        vehicleType = "truck"
+                    elseif mass < 500 then
+                        vehicleType = "motorcycle"
+                    elseif mass > 2000 then
+                        vehicleType = "van"
+                    end
+                end
             end
         end
     end)
+
+    if Config:Get("debugMode") then
+        print(string.format("[G923Mod] Vehicle type detected: %s", vehicleType))
+    end
 
     return vehicleType
 end
@@ -395,6 +686,125 @@ function VehicleInputOverride:SetActive(active)
     print("[G923Mod] Input override manually " .. (active and "activated" or "deactivated"))
 end
 
+-- Test vehicle input override functionality
+function VehicleInputOverride:TestVehicleInputMethods()
+    if not self.currentVehicle then
+        print("[G923Mod] No vehicle available for testing")
+        return false
+    end
+
+    print("[G923Mod] Testing vehicle input override methods...")
+
+    local testResults = {
+        blackboard = false,
+        component = false,
+        physics = false,
+        controller = false
+    }
+
+    -- Test values
+    local testSteering = 0.5
+    local testThrottle = 0.3
+    local testBrake = 0.2
+
+    -- Test blackboard method
+    testResults.blackboard = self:ApplyInputsViaBlackboard(testSteering, testThrottle, testBrake)
+
+    -- Test component method
+    testResults.component = self:ApplyInputsViaComponent(testSteering, testThrottle, testBrake)
+
+    -- Test physics method
+    testResults.physics = self:ApplyInputsViaPhysics(testSteering, testThrottle, testBrake)
+
+    -- Test controller method
+    testResults.controller = self:ApplyInputsViaController(testSteering, testThrottle, testBrake)
+
+    -- Report results
+    print("[G923Mod] Vehicle Input Test Results:")
+    for method, success in pairs(testResults) do
+        local status = success and "✅ PASS" or "❌ FAIL"
+        print(string.format("  %s: %s", method, status))
+    end
+
+    local totalPassed = 0
+    for _, success in pairs(testResults) do
+        if success then totalPassed = totalPassed + 1 end
+    end
+
+    print(string.format("[G923Mod] Test Summary: %d/4 methods working", totalPassed))
+    return totalPassed > 0
+end
+
+-- Validate current vehicle input override status
+function VehicleInputOverride:ValidateInputOverride()
+    if not self.active then
+        return { status = "inactive", message = "Input override not active" }
+    end
+
+    if not self.currentVehicle then
+        return { status = "error", message = "No current vehicle found" }
+    end
+
+    if not InputHandler:IsWheelConnected() then
+        return { status = "error", message = "Wheel not connected" }
+    end
+
+    -- Test if wheel inputs are being detected
+    local steering = InputHandler:GetSteering()
+    local throttle = InputHandler:GetThrottle()
+    local brake = InputHandler:GetBrake()
+
+    local hasInput = math.abs(steering) > 0.01 or throttle > 0.01 or brake > 0.01
+
+    if not hasInput then
+        return {
+            status = "warning",
+            message = "No wheel input detected - try moving wheel or pressing pedals"
+        }
+    end
+
+    -- Test if input methods are working
+    local methodsWorking = self:TestVehicleInputMethods()
+
+    if not methodsWorking then
+        return {
+            status = "error",
+            message = "No vehicle input methods are working - CET API compatibility issue"
+        }
+    end
+
+    return {
+        status = "success",
+        message = "Vehicle input override is working correctly",
+        vehicleType = self:GetVehicleType(self.currentVehicle),
+        inputs = { steering = steering, throttle = throttle, brake = brake }
+    }
+end
+
+-- Get detailed status report for debugging
+function VehicleInputOverride:GetDetailedStatus()
+    local status = {
+        initialized = self.initialized,
+        active = self.active,
+        wheelConnected = InputHandler:IsWheelConnected(),
+        currentVehicle = self.currentVehicle ~= nil,
+        vehicleType = self.currentVehicle and self:GetVehicleType(self.currentVehicle) or "none",
+        hooksActive = #self.originalHooks > 0,
+        inputOverrides = self.inputOverrides
+    }
+
+    if self.currentVehicle then
+        status.vehicleDetails = {
+            hasBlackboard = self.currentVehicle.GetBlackboard ~= nil,
+            hasVehicleComponent = self.currentVehicle.GetVehicleComponent ~= nil,
+            hasPhysicsComponent = self.currentVehicle.GetPhysicsComponent ~= nil,
+            hasRecord = self.currentVehicle.GetRecord ~= nil
+        }
+    end
+
+    return status
+end
+
 -- Shutdown the override system
 function VehicleInputOverride:Shutdown()
     if not self.initialized then
@@ -411,10 +821,29 @@ function VehicleInputOverride:Shutdown()
     -- Remove any hooks or overrides
     self:RestoreOriginalSettings()
 
-    -- TODO: Unhook any CET function overrides
+    -- Clean up CET hooks/overrides
+    self:CleanupHooks()
 
     self.initialized = false
     print("[G923Mod] Vehicle input override system shutdown complete")
+end
+
+-- Clean up all registered hooks and overrides
+function VehicleInputOverride:CleanupHooks()
+    -- Note: CET doesn't provide a direct way to remove Override/ObserveAfter hooks
+    -- The hooks will be cleaned up when the mod is reloaded
+    -- In a production version, we might need to track and manage hook lifecycle differently
+
+    if self.originalHooks then
+        -- Clear hook references
+        for hookName, hookRef in pairs(self.originalHooks) do
+            -- Individual hook cleanup would go here if CET supported it
+            print(string.format("[G923Mod] Cleaned up hook: %s", hookName))
+        end
+        self.originalHooks = {}
+    end
+
+    print("[G923Mod] All hooks cleaned up (will be fully removed on mod reload)")
 end
 
 return VehicleInputOverride

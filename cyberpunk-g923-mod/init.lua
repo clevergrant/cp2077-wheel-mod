@@ -275,6 +275,70 @@ function G923Mod:RegisterConsoleCommands()
             end
         end
 
+        -- Vehicle Input Override Commands
+        _G.g923_vehicle_test = function()
+            print("[G923Mod] Testing vehicle input override methods...")
+            local result = VehicleInputOverride:TestVehicleInputMethods()
+            if result then
+                print("✅ Vehicle input override test completed - see results above")
+            else
+                print("❌ Vehicle input override test failed - no vehicle available")
+            end
+        end
+
+        _G.g923_vehicle_validate = function()
+            print("[G923Mod] Validating vehicle input override status...")
+            local validation = VehicleInputOverride:ValidateInputOverride()
+
+            local statusIcon = "❓"
+            if validation.status == "success" then statusIcon = "✅"
+            elseif validation.status == "error" then statusIcon = "❌"
+            elseif validation.status == "warning" then statusIcon = "⚠️"
+            elseif validation.status == "inactive" then statusIcon = "ℹ️"
+            end
+
+            print(statusIcon .. " " .. validation.message)
+
+            if validation.vehicleType then
+                print("  Vehicle Type: " .. validation.vehicleType)
+            end
+
+            if validation.inputs then
+                print(string.format("  Current Inputs: S=%.2f T=%.2f B=%.2f",
+                      validation.inputs.steering, validation.inputs.throttle, validation.inputs.brake))
+            end
+        end
+
+        _G.g923_vehicle_status = function()
+            print("[G923Mod] Vehicle Input Override Detailed Status:")
+            local status = VehicleInputOverride:GetDetailedStatus()
+
+            print("  System Status:")
+            print("    Initialized: " .. tostring(status.initialized))
+            print("    Active: " .. tostring(status.active))
+            print("    Wheel Connected: " .. tostring(status.wheelConnected))
+            print("    Current Vehicle: " .. tostring(status.currentVehicle))
+
+            if status.currentVehicle then
+                print("  Vehicle Details:")
+                print("    Type: " .. status.vehicleType)
+                print("    Has Blackboard: " .. tostring(status.vehicleDetails.hasBlackboard))
+                print("    Has Vehicle Component: " .. tostring(status.vehicleDetails.hasVehicleComponent))
+                print("    Has Physics Component: " .. tostring(status.vehicleDetails.hasPhysicsComponent))
+                print("    Has Record: " .. tostring(status.vehicleDetails.hasRecord))
+            end
+
+            print("  Configuration:")
+            print("    Hooks Active: " .. tostring(status.hooksActive))
+
+            if next(status.inputOverrides) then
+                print("  Active Overrides:")
+                for key, value in pairs(status.inputOverrides) do
+                    print("    " .. key .. ": " .. tostring(value))
+                end
+            end
+        end
+
         _G.g923_vehicle_sensitivity = function(car, motorcycle, truck)
             if car then
                 Config:Set("carSensitivity", tonumber(car))
