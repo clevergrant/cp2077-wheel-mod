@@ -1,0 +1,99 @@
+{
+  "name": "Cyberpunk 2077 G923 Steering Wheel Mod",
+  "version": "3.0.0",
+  "author": "G923ModTeam",
+  "description": "Comprehensive Logitech G923 steering wheel integration for Cyberpunk 2077, featuring real DirectInput hardware communication, advanced force feedback, auto-calibration, and vehicle-specific handling.",
+  "game": "cyberpunk2077",
+  "modid": "g923-steering-wheel",
+  "category": "Input and Controls",
+  "tags": [
+    "steering wheel",
+    "g923",
+    "logitech",
+    "force feedback",
+    "directinput",
+    "vehicle control",
+    "immersion",
+    "hardware support",
+    "input enhancement",
+    "driving simulation"
+  ],
+  "nexus_category": "Input and Controls",
+  "nexus_tags": [
+    "Gameplay",
+    "Immersion", 
+    "Vehicles",
+    "Hardware Support"
+  ],
+  "requirements": [
+    {
+      "name": "Cyber Engine Tweaks",
+      "version": "1.32.0",
+      "required": true,
+      "description": "Required for mod functionality and console commands",
+      "nexus_url": "https://www.nexusmods.com/cyberpunk2077/mods/107"
+    }
+  ],
+  "recommended": [
+    {
+      "name": "Logitech G HUB",
+      "description": "Official Logitech software for G923 wheel configuration",
+      "url": "https://www.logitechg.com/en-us/innovation/g-hub.html"
+    }
+  ],
+  "installation": {
+    "type": "cet_mod",
+    "destination": "bin/x64/plugins/cyber_engine_tweaks/mods/cyberpunk-g923-mod",
+    "supports_vortex": true,
+    "supports_manual": true,
+    "fomod_installer": true
+  },
+  "compatibility": {
+    "game_version": "2.0+",
+    "platform": "PC",
+    "os": ["Windows 10", "Windows 11"],
+    "conflicts": [],
+    "notes": "Requires DirectInput support. Works best with 60+ FPS."
+  },
+  "features": [
+    "Real DirectInput hardware communication",
+    "Advanced force feedback with road texture simulation", 
+    "Machine learning auto-calibration system",
+    "Vehicle-specific handling (cars, motorcycles, trucks)",
+    "20+ console commands for configuration",
+    "Performance monitoring and optimization",
+    "Professional module architecture"
+  ],
+  "files": [
+    {
+      "source": "cyberpunk-g923-mod/",
+      "destination": "bin/x64/plugins/cyber_engine_tweaks/mods/cyberpunk-g923-mod/",
+      "recursive": true
+    }
+  ],
+  "documentation": [
+    "README.md",
+    "NEXUS_README.md", 
+    "INSTALLATION_GUIDE.md",
+    "IN_GAME_TESTING_GUIDE.md"
+  ],
+  "quick_start": {
+    "steps": [
+      "Connect Logitech G923 wheel",
+      "Launch Cyberpunk 2077",
+      "Open CET console (~)",
+      "Type: g923_status()",
+      "Type: g923_calibrate(\"auto\")",
+      "Get in vehicle and drive!"
+    ]
+  },
+  "console_commands": {
+    "essential": [
+      "g923_status() - Check mod status",
+      "g923_help() - Show all commands",
+      "g923_calibrate(\"auto\") - Auto-calibration",
+      "g923_sensitivity(1.5) - Set sensitivity",
+      "g923_debug(true) - Enable debug mode"
+    ]
+  }
+}

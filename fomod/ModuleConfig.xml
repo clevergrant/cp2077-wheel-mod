@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+	<moduleName>Cyberpunk 2077 G923 Steering Wheel Mod</moduleName>
+	<moduleImage path="fomod\logo.png"/>
+
+	<installSteps>
+		<installStep name="Welcome">
+			<optionalFileGroups>
+				<group name="Welcome to G923 Steering Wheel Mod" type="SelectExactlyOne">
+					<plugins>
+						<plugin name="Install G923 Steering Wheel Mod">
+							<description>
+								🎮 Cyberpunk 2077 G923 Steering Wheel Mod v3.0.0
+
+								This mod adds comprehensive Logitech G923 steering wheel support to Cyberpunk 2077.
+
+								🔧 REQUIREMENTS:
+								• Cyberpunk 2077 v2.0+
+								• Cyber Engine Tweaks (CET) v1.32.0+
+								• Logitech G923 Steering Wheel
+								• Windows 10/11 with DirectInput support
+
+								✨ FEATURES:
+								• Real DirectInput hardware communication
+								• Advanced force feedback with road texture simulation
+								• Auto-calibration system with machine learning
+								• Vehicle-specific handling for cars, motorcycles, trucks
+								• 20+ console commands for configuration
+								• Performance monitoring and optimization
+
+								📁 INSTALLATION:
+								This mod will install to your CET mods directory:
+								bin/x64/plugins/cyber_engine_tweaks/mods/cyberpunk-g923-mod/
+
+								🚀 GETTING STARTED:
+								After installation:
+								1. Launch Cyberpunk 2077
+								2. Open CET console (~ key)
+								3. Type: g923_status()
+								4. Type: g923_calibrate("auto")
+								5. Get in a vehicle and test!
+
+								⚠️ IMPORTANT:
+								Ensure Cyber Engine Tweaks is installed BEFORE installing this mod.
+							</description>
+							<image path="fomod\preview.png"/>
+							<files>
+								<folder source="cyberpunk-g923-mod" destination="bin\x64\plugins\cyber_engine_tweaks\mods\cyberpunk-g923-mod" priority="0"/>
+							</files>
+							<typeDescriptor>
+								<type name="Required"/>
+							</typeDescriptor>
+						</plugin>
+					</plugins>
+				</group>
+			</optionalFileGroups>
+		</installStep>
+
+		<installStep name="Installation Complete">
+			<optionalFileGroups>
+				<group name="Installation Successful" type="SelectExactlyOne">
+					<plugins>
+						<plugin name="Ready to Use">
+							<description>
+								✅ Installation Complete!
+
+								Your G923 Steering Wheel Mod has been successfully installed.
+
+								🎮 NEXT STEPS:
+								1. Connect your Logitech G923 wheel
+								2. Launch Cyberpunk 2077
+								3. Open CET console with ~ key
+								4. Type: g923_status() to verify
+								5. Type: g923_calibrate("auto") for setup
+								6. Get in any vehicle and drive!
+
+								📖 ESSENTIAL COMMANDS:
+								• g923_help() - Show all commands
+								• g923_sensitivity(1.5) - Adjust steering sensitivity
+								• g923_force_feedback(true) - Enable force feedback
+								• g923_debug(true) - Enable debug mode
+
+								🔧 TROUBLESHOOTING:
+								• If wheel not detected: g923_simulate(true)
+								• For input issues: g923_debug(true)
+								• For force feedback: g923_test_effects()
+
+								📋 DOCUMENTATION:
+								Complete guides and troubleshooting included in mod files.
+
+								Happy driving in Night City! 🌃🚗
+							</description>
+							<image path="fomod\complete.png"/>
+							<files>
+								<!-- No additional files needed -->
+							</files>
+							<typeDescriptor>
+								<type name="Required"/>
+							</typeDescriptor>
+						</plugin>
+					</plugins>
+				</group>
+			</optionalFileGroups>
+		</installStep>
+	</installSteps>
+</config>

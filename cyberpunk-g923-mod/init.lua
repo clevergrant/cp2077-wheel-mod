@@ -18,6 +18,7 @@ local Config = require("modules/config")
 local RealDirectInput = require("modules/real_directinput")
 local PerformanceMonitor = require("modules/performance_monitor")
 local InputCalibration = require("modules/input_calibration")
+local InstallationCheck = require("modules/installation_check")
 
 -- Initialize the mod
 function G923Mod:Initialize()
@@ -26,6 +27,13 @@ function G923Mod:Initialize()
     end
 
     print("[G923Mod] Initializing G923 Steering Wheel Mod v" .. self.version)
+
+    -- Run installation verification
+    local installOK = InstallationCheck:VerifyInstallation()
+    if not installOK then
+        print("[G923Mod] ❌ Installation verification failed! Please check installation.")
+        return false
+    end
 
     -- Load configuration
     Config:Load()
@@ -60,6 +68,9 @@ function G923Mod:Initialize()
 
     self.initialized = true
     print("[G923Mod] Phase 4 initialization complete - Production-ready implementation active")
+
+    -- Show quick start guide for new users
+    InstallationCheck:ShowQuickStart()
 end
 
 -- Update function called every frame
