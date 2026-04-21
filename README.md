@@ -1,139 +1,112 @@
-# Cyberpunk 2077 G923 Steering Wheel Mod - Project Repository
+# Cyberpunk 2077 — Logitech G-series Steering Wheel Mod
 
-## 📁 Repository Structure
+A RED4ext plugin that gives Cyberpunk 2077 first-class support for Logitech G-series steering wheels. Reads the wheel directly via DirectInput 8, drives game-generated force feedback back to the wheel, exposes settings in the game's own menu, and respects Logitech G HUB by default.
 
-This repository contains the complete **Cyberpunk 2077 G923 Steering Wheel Mod** with all necessary files for Nexus Mods deployment and Vortex compatibility.
+Version: **0.1.0** — first release of a ground-up rewrite. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
-### 🎯 Single Source of Truth
+## Features
 
-**Main Mod Directory**: `cyberpunk-g923-mod/`
+- Any Logitech G-series wheel (see table below), auto-detected by USB VID/PID.
+- Steering, throttle, brake, and clutch routed directly from the wheel to Cyberpunk's vehicle input.
+- Force-feedback effects for collisions and surface texture. FFB is skipped gracefully on wheels without a motor.
+- Settings page in the game's own menu (via [Mod Settings](https://github.com/jackhumbert/mod_settings)) — deadzones, FFB strength, per-vehicle response curves, and an opt-in Override G HUB section.
+- **Respects Logitech G HUB.** Rotation range, sensitivity curve, and centering spring stay with G HUB unless you explicitly turn on Override.
 
-This contains everything needed for the mod:
-- **Core Mod Files**: All Lua modules and initialization scripts
-- **FOMOD Installer**: `fomod/` directory with guided installation
-- **Documentation**: README, changelog, and mod info
-- **Nexus-Ready Structure**: Proper file organization for deployment
+## Supported wheels
 
-## 🚀 For End Users
+| Model | Force feedback |
+| --- | --- |
+| WingMan Formula Force | yes |
+| WingMan Formula Force GP | yes |
+| Driving Force | no |
+| Momo Force | yes |
+| Driving Force Pro | yes |
+| G25 Racing Wheel | yes |
+| Driving Force GT | yes |
+| G27 Racing Wheel | yes |
+| G29 Driving Force | yes |
+| G920 Driving Force | yes |
+| G923 (Xbox / PS / PC) | yes |
+| Momo Racing | yes |
+| Formula Vibration Feedback | vibration only |
 
-**Download the mod from [Nexus Mods](https://www.nexusmods.com/cyberpunk2077) for the latest stable release.**
+Non-Logitech wheels are not supported. If your wheel is plugged in and this mod doesn't claim it, the mod exits cleanly and stays out of the way.
 
-### Quick Installation
-1. Install [Cyber Engine Tweaks](https://www.nexusmods.com/cyberpunk2077/mods/107) (REQUIRED)
-2. Download this mod via Vortex or manually
-3. Launch Cyberpunk 2077
-4. Open console (~) and type: `g923_status()`
-5. Type: `g923_calibrate("auto")`
-6. Get in a vehicle and drive!
+## Requirements
 
-## 🔧 For Developers
+- **Cyberpunk 2077** 2.0 or later (tested against current patch).
+- **[RED4ext](https://github.com/WopsS/RED4ext)** — loads the plugin.
+- **[redscript](https://github.com/jac3km4/redscript)** — compiles the `.reds` files.
+- **[Mod Settings](https://github.com/jackhumbert/mod_settings)** — in-game settings page framework.
+- **[ArchiveXL](https://github.com/psiberx/cp2077-archive-xl)** — required by Mod Settings.
+- **Logitech G HUB** (recommended) — Logitech's own wheel manager. This mod plays nicely with it.
 
-### Repository Contents
-- `cyberpunk-g923-mod/` - Complete mod package (deploy this to Nexus)
-- Development files and project documentation in root
+No Cyber Engine Tweaks dependency.
 
-### Key Features
-- **Real DirectInput Integration**: Hardware communication with G923 wheel
-- **20+ Console Commands**: Complete configuration system
-- **Auto-Calibration**: Machine learning-based setup
-- **Vehicle-Specific Handling**: Cars, motorcycles, trucks
-- **Force Feedback**: Road texture and collision simulation
-- **FOMOD Installer**: Vortex-compatible guided installation
+## Install
 
-### Contributing
-This mod welcomes contributions for:
-- DirectInput Windows API enhancements
-- Performance optimizations
-- Additional hardware support
-- Bug fixes and testing
+### Via Vortex
 
-## 📋 Version Info
+1. Install the dependencies above (each has its own Nexus listing and FOMOD).
+2. Download the latest release ZIP from Nexus.
+3. Drop it on Vortex; accept the FOMOD prompts. The installer warns if RED4ext, ArchiveXL, or Mod Settings isn't present.
 
-**Current Version**: 3.0.0 (Production Release)
-**Framework**: Cyber Engine Tweaks
-**Game**: Cyberpunk 2077 v2.0+
-**Hardware**: Logitech G923 Steering Wheel
+### Manually
 
----
+Extract the release ZIP into your Cyberpunk 2077 install directory. The expected final layout:
 
-*Transform your Night City driving experience! 🌃🚗*
+```text
+<CP2077>/red4ext/plugins/gwheel/gwheel.dll
+<CP2077>/r6/scripts/gwheel/gwheel_natives.reds
+<CP2077>/r6/scripts/gwheel/gwheel_vehicle_override.reds
+<CP2077>/r6/scripts/gwheel/gwheel_settings.reds
+```
+
+## First run
+
+1. Plug the wheel in and let G HUB pick it up.
+2. Launch the game. The plugin logs to `red4ext/logs/gwheel-*.log`; look for `[gwheel] loaded v0.1.0` and a line naming the detected wheel.
+3. Open the game's Settings menu → **Mod Settings** → **G-series Wheel**.
+4. In the Advanced section, the first-time tip reads: "Sensitivity, rotation range, and centering spring are managed by G HUB. Enable Advanced → Override G HUB only if you want this mod to take control."
+5. Get in any car. The wheel should steer it.
+
+## Configuration
+
+All settings live in the game's Settings menu. Three groups:
+
+- **Wheel — Input.** Master toggle, per-axis deadzones, per-vehicle response curve.
+- **Wheel — FFB.** Enable, strength (scales collision/texture effects), debug logging.
+- **Wheel — Advanced.** **Override G HUB** toggle (default OFF). Only when ON: sensitivity, operating range, centering spring. Leaving this OFF preserves whatever you've tuned in G HUB.
+
+Values are persisted by Mod Settings across game runs. A backup copy is written to `<CP2077>/red4ext/plugins/gwheel/config.json` — safe to copy/edit between installs, but the game-side Settings page is authoritative while the game is running.
 
 ## Troubleshooting
 
-### Game Won't Start / Script Error
+**Plugin doesn't load.** Check `<CP2077>/red4ext/logs/` for entries tagged `[gwheel]`. A missing entry means RED4ext didn't load it — verify `red4ext/plugins/gwheel/gwheel.dll` exists and is unblocked (right-click → Properties → Unblock if Windows marked it).
 
-1. **Disable mod**: Rename `cyberpunk-g923-mod` folder to `cyberpunk-g923-mod-DISABLED`
-2. **Verify game files** in Steam/GOG/Epic
-3. **Update CET** to latest version
-4. **Re-enable mod** and test `g923_status()`
+**Settings page doesn't appear.** Mod Settings + ArchiveXL need to be installed correctly. The wheel still works without them; you just lose in-game tuning. Edit `config.json` directly as a fallback.
 
-### Wheel Not Detected
+**Wheel detected but nothing happens in the car.** The redscript vehicle-input hook is the fragile part. Check `red4ext/logs/` for compilation errors in `gwheel_vehicle_override.reds`. A game patch that renames `VehicleComponent` or its methods will break the hook until that file is updated.
 
-1. **Check USB connection** (use USB 3.0 port)
-2. **Install Logitech G HUB** and calibrate wheel
-3. **Test in console**: `g923_hardware("test")`
-4. **Try manual calibration**: `g923_calibrate("manual")`
+**FFB never fires.** Confirm the wheel has a motor (see the supported-wheels table). Confirm `GWheel_HasFFB()` returns true in the mod's log output. In G HUB, make sure "Allow game to adjust settings" is enabled; without it the game's force commands won't reach the wheel.
 
-### Poor Performance / Stuttering
+## Uninstall
 
-1. **Enable performance mode**: `g923_performance("optimization")`
-2. **Lower sensitivity**: `g923_sensitivity(1.0)`
-3. **Increase deadzones**: `g923_deadzone(10, 15, 10)`
-4. **Check frame rate** (60+ FPS recommended)
+Delete:
 
-### No Force Feedback
+- `<CP2077>/red4ext/plugins/gwheel/`
+- `<CP2077>/r6/scripts/gwheel/`
 
-1. **Enable in mod**: `g923_force_feedback(true)`
-2. **Test effects**: `g923_test_effects()`
-3. **Check G HUB settings** (enable force feedback)
-4. **Try different vehicle** (effects vary by vehicle type)
+(Vortex handles both automatically on uninstall.)
 
-### Console Commands Not Working
+## Contributing
 
-1. **Open and close console** once (press `~` twice)
-2. **Try**: `g923_status()` again
-3. **Check mod loading**: `print("G923 loaded:", _G.G923Mod ~= nil)`
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the internals. PRs welcome, especially for:
 
-## Configuration Files
+- Additional Logitech wheel PIDs not in the table
+- Additional per-vehicle response profiles
+- Confirmed RTTI method signatures as game patches ship
 
-Settings are automatically saved to:
+## License
 
-```
-Cyberpunk 2077/bin/x64/plugins/cyber_engine_tweaks/mods/cyberpunk-g923-mod/config.json
-```
-
-**Backup your config** before updating the mod!
-
-## Compatibility
-
-### Supported Wheels
-
-- **Logitech G923** (Primary support)
-- Other DirectInput wheels may work with limited functionality
-
-### Game Versions
-
-- **Cyberpunk 2077 v2.0+** (Required)
-- **Phantom Liberty DLC** (Compatible)
-
-### Known Conflicts
-
-- Mods that override vehicle input systems
-- Other steering wheel mods
-- Some input remapping mods
-
-## Support & Updates
-
-- **Report issues**: Include `g923_status()` output and CET logs
-- **Request features**: Describe use case and vehicle type
-- **Performance issues**: Include `g923_performance("status")` output
-
-## Version History
-
-**v3.0.0** - Real DirectInput integration, auto-calibration, performance monitoring
-**v2.x** - Force feedback system, vehicle-specific handling
-**v1.x** - Basic steering wheel support
-
-## Credits
-
-Developed for the Cyberpunk 2077 modding community. Uses Cyber Engine Tweaks framework and DirectInput API for hardware communication.
+TBD — v0.1.0 is unlicensed. A license will be added before the first public Nexus release.

@@ -1,50 +1,72 @@
-# Cyberpunk 2077 G923 Steering Wheel Mod - Git Ignore
+# Build output
+build/
+out/
+dist/
+bin/
+obj/
+x64/
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
 
-# CET (Cyber Engine Tweaks) specific
-*.log
-*.tmp
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+CTestTestfile.cmake
+install_manifest.txt
+compile_commands.json
+cmake-build-*/
 
-# Lua compiled files
-*.luac
+# MSVC / Visual Studio
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll.manifest
+*.idb
+*.sln
+*.vcxproj
+*.vcxproj.user
+*.vcxproj.filters
+.vs/
 
-# VS Code workspace files
+# VS Code / IDE
 .vscode/
 *.code-workspace
+*.swp
+*.swo
+*~
 
-# Windows specific
+# redscript / REDmod caches produced when testing against a real game install
+r6/cache/modded/
+r6/cache/final.redscripts.bk
+*.redscripts.log
+
+# Local test-install scripts and game copies
+test-install/
+game-copy/
+
+# Logs / crash dumps
+*.log
+*.dmp
+crash_*
+error_*
+
+# Windows
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 
-# macOS specific
+# macOS
 .DS_Store
 .AppleDouble
 .LSOverride
 
-# Backup files
+# Backups
 *.bak
 *.backup
-*~
-
-# Configuration overrides (keep default configs)
-config_user.lua
-settings_local.lua
-
-# Development and testing
-test/
-debug/
-temp/
-
-# Documentation build artifacts
-docs/_build/
-docs/.doctrees/
-
-# IDE files
-*.swp
-*.swo
-*~
-
-# Runtime logs and crash dumps
-crash_*.dmp
-error_*.log

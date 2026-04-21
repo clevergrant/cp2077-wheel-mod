@@ -1,0 +1,3 @@
+[submodule "gwheel/vendor/RED4ext.SDK"]
+	path = gwheel/vendor/RED4ext.SDK
+	url = https://github.com/WopsS/RED4ext.SDK.git

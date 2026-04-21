@@ -1,106 +1,122 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
-	<moduleName>Cyberpunk 2077 G923 Steering Wheel Mod</moduleName>
-	<moduleImage path="fomod\logo.png"/>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
 
-	<installSteps>
-		<installStep name="Welcome">
-			<optionalFileGroups>
-				<group name="Welcome to G923 Steering Wheel Mod" type="SelectExactlyOne">
-					<plugins>
-						<plugin name="Install G923 Steering Wheel Mod">
-							<description>
-								🎮 Cyberpunk 2077 G923 Steering Wheel Mod v3.0.0
+  <moduleName>Logitech G-series Wheel Mod</moduleName>
 
-								This mod adds comprehensive Logitech G923 steering wheel support to Cyberpunk 2077.
+  <!-- Full mod requires RED4ext at minimum. ArchiveXL is pulled in transitively
+       by Mod Settings; we flag its absence rather than hard-blocking since users
+       frequently install it after the FOMOD run. -->
+  <moduleDependencies operator="And">
+    <fileDependency file="bin\x64\Cyberpunk2077.exe" state="Active"/>
+  </moduleDependencies>
 
-								🔧 REQUIREMENTS:
-								• Cyberpunk 2077 v2.0+
-								• Cyber Engine Tweaks (CET) v1.32.0+
-								• Logitech G923 Steering Wheel
-								• Windows 10/11 with DirectInput support
+  <requiredInstallFiles>
+    <file source="build\gwheel.dll"
+          destination="red4ext\plugins\gwheel\gwheel.dll"/>
+    <file source="gwheel_reds\gwheel_natives.reds"
+          destination="r6\scripts\gwheel\gwheel_natives.reds"/>
+    <file source="gwheel_reds\gwheel_vehicle_override.reds"
+          destination="r6\scripts\gwheel\gwheel_vehicle_override.reds"/>
+    <file source="gwheel_reds\gwheel_settings.reds"
+          destination="r6\scripts\gwheel\gwheel_settings.reds"/>
+  </requiredInstallFiles>
 
-								✨ FEATURES:
-								• Real DirectInput hardware communication
-								• Advanced force feedback with road texture simulation
-								• Auto-calibration system with machine learning
-								• Vehicle-specific handling for cars, motorcycles, trucks
-								• 20+ console commands for configuration
-								• Performance monitoring and optimization
+  <installSteps order="Explicit">
 
-								📁 INSTALLATION:
-								This mod will install to your CET mods directory:
-								bin/x64/plugins/cyber_engine_tweaks/mods/cyberpunk-g923-mod/
+    <installStep name="Dependency check">
+      <optionalFileGroups order="Explicit">
 
-								🚀 GETTING STARTED:
-								After installation:
-								1. Launch Cyberpunk 2077
-								2. Open CET console (~ key)
-								3. Type: g923_status()
-								4. Type: g923_calibrate("auto")
-								5. Get in a vehicle and test!
+        <group name="Required dependencies" type="SelectExactlyOne">
+          <plugins order="Explicit">
 
-								⚠️ IMPORTANT:
-								Ensure Cyber Engine Tweaks is installed BEFORE installing this mod.
-							</description>
-							<image path="fomod\preview.png"/>
-							<files>
-								<folder source="cyberpunk-g923-mod" destination="bin\x64\plugins\cyber_engine_tweaks\mods\cyberpunk-g923-mod" priority="0"/>
-							</files>
-							<typeDescriptor>
-								<type name="Required"/>
-							</typeDescriptor>
-						</plugin>
-					</plugins>
-				</group>
-			</optionalFileGroups>
-		</installStep>
+            <plugin name="RED4ext is installed — continue">
+              <description>RED4ext was detected in this game install. Installation will proceed.</description>
+              <conditionFlags>
+                <flag name="deps_ok">yes</flag>
+              </conditionFlags>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Optional"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies>
+                        <fileDependency file="red4ext\RED4ext.dll" state="Active"/>
+                      </dependencies>
+                      <type name="Recommended"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
 
-		<installStep name="Installation Complete">
-			<optionalFileGroups>
-				<group name="Installation Successful" type="SelectExactlyOne">
-					<plugins>
-						<plugin name="Ready to Use">
-							<description>
-								✅ Installation Complete!
+            <plugin name="RED4ext is missing — I will install it afterward">
+              <description>RED4ext was not found at red4ext/RED4ext.dll. This mod REQUIRES it. Cancel now and install RED4ext from https://www.nexusmods.com/cyberpunk2077/mods/2380, then re-run this installer. Choose this option only if you plan to install RED4ext yourself before launching the game.</description>
+              <conditionFlags>
+                <flag name="deps_ok">ack</flag>
+              </conditionFlags>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="NotUsable"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies operator="Or">
+                        <fileDependency file="red4ext\RED4ext.dll" state="Missing"/>
+                        <fileDependency file="red4ext\RED4ext.dll" state="Inactive"/>
+                      </dependencies>
+                      <type name="Optional"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
 
-								Your G923 Steering Wheel Mod has been successfully installed.
+          </plugins>
+        </group>
 
-								🎮 NEXT STEPS:
-								1. Connect your Logitech G923 wheel
-								2. Launch Cyberpunk 2077
-								3. Open CET console with ~ key
-								4. Type: g923_status() to verify
-								5. Type: g923_calibrate("auto") for setup
-								6. Get in any vehicle and drive!
+        <group name="Recommended companions" type="SelectAny">
+          <plugins order="Explicit">
 
-								📖 ESSENTIAL COMMANDS:
-								• g923_help() - Show all commands
-								• g923_sensitivity(1.5) - Adjust steering sensitivity
-								• g923_force_feedback(true) - Enable force feedback
-								• g923_debug(true) - Enable debug mode
+            <plugin name="ArchiveXL (required by Mod Settings)">
+              <description>Mod Settings (the in-game settings page provider this mod uses) depends on ArchiveXL. If ArchiveXL is missing the Settings page will not appear, but the wheel will still work. Install ArchiveXL from https://www.nexusmods.com/cyberpunk2077/mods/4198.</description>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Optional"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies>
+                        <fileDependency file="red4ext\plugins\ArchiveXL\ArchiveXL.dll" state="Active"/>
+                      </dependencies>
+                      <type name="Recommended"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
 
-								🔧 TROUBLESHOOTING:
-								• If wheel not detected: g923_simulate(true)
-								• For input issues: g923_debug(true)
-								• For force feedback: g923_test_effects()
+            <plugin name="Mod Settings (in-game settings page)">
+              <description>Adds the "Mod Settings" menu where this mod exposes deadzones, FFB strength, and the Override G HUB section. Without it the wheel works but you cannot adjust settings from within the game (the plugin will use defaults and read config.json on disk instead). Install from https://www.nexusmods.com/cyberpunk2077/mods/4885.</description>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Optional"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies>
+                        <fileDependency file="r6\scripts\mod_settings\ModSettings.reds" state="Active"/>
+                      </dependencies>
+                      <type name="Recommended"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
 
-								📋 DOCUMENTATION:
-								Complete guides and troubleshooting included in mod files.
+          </plugins>
+        </group>
 
-								Happy driving in Night City! 🌃🚗
-							</description>
-							<image path="fomod\complete.png"/>
-							<files>
-								<!-- No additional files needed -->
-							</files>
-							<typeDescriptor>
-								<type name="Required"/>
-							</typeDescriptor>
-						</plugin>
-					</plugins>
-				</group>
-			</optionalFileGroups>
-		</installStep>
-	</installSteps>
+      </optionalFileGroups>
+    </installStep>
+
+  </installSteps>
+
 </config>
