@@ -1,0 +1,25 @@
+#pragma once
+
+#include <cstdint>
+
+namespace gwheel::vehicle_hook
+{
+    // Attach the vehicle-input detour. Uses RED4ext's UniversalReloc hash
+    // resolver (address database maintained in RED4ext.dll, updated by the
+    // RED4ext maintainers per game patch). Returns true iff the hook
+    // attached successfully; returns false if RED4ext's hooking API is
+    // unavailable or Attach failed. A failed hash resolution terminates
+    // the game process with a RED4ext-authored MessageBox - the game
+    // won't launch at all until sigs / hashes are correct for the build.
+    bool Init();
+
+    // Detach the hook.
+    void Shutdown();
+
+    // True iff the detour is currently attached.
+    bool IsInstalled();
+
+    // Monotonic counter of how many times the detour has fired since
+    // attach. Useful for confirming the hook is live in-car.
+    uint64_t FireCount();
+}

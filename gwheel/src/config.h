@@ -3,9 +3,16 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace gwheel::config
 {
+    struct ButtonBinding
+    {
+        int32_t     button = -1;
+        std::string action;
+    };
+
     struct Input
     {
         bool        enabled = true;
@@ -38,7 +45,7 @@ namespace gwheel::config
 
     struct Config
     {
-        int32_t     version = 1;
+        int32_t     version = 2;
         Input       input;
         Ffb         ffb;
         Override    override_;
@@ -46,6 +53,7 @@ namespace gwheel::config
         PerVehicle  motorcycle = { 1.2f, 10 };
         PerVehicle  truck      = { 0.8f, 40 };
         PerVehicle  van        = { 0.9f, 30 };
+        std::vector<ButtonBinding> buttons;
     };
 
     // Read the published snapshot. Non-blocking; safe from any thread.
@@ -76,4 +84,8 @@ namespace gwheel::config
     void SetOverrideSensitivity(float v);
     void SetOverrideRangeDeg(int32_t v);
     void SetOverrideCenteringSpringPct(int32_t v);
+
+    // Button bindings: button index (0..31) -> action name. Empty action clears.
+    void SetButtonBinding(int32_t button, std::string_view action);
+    void ClearButtonBinding(int32_t button);
 }

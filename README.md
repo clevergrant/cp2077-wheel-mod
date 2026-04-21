@@ -1,6 +1,6 @@
 # Cyberpunk 2077 — Logitech G-series Steering Wheel Mod
 
-A RED4ext plugin that gives Cyberpunk 2077 first-class support for Logitech G-series steering wheels. Reads the wheel directly via DirectInput 8, drives game-generated force feedback back to the wheel, exposes settings in the game's own menu, and respects Logitech G HUB by default.
+A RED4ext plugin that gives Cyberpunk 2077 first-class support for Logitech G-series steering wheels. Reads the wheel through the official Logitech Steering Wheel SDK, drives force feedback back to the wheel, injects vehicle input into `Cyberpunk2077.exe` via a direct function detour (no virtual gamepad, no driver install), and exposes settings in the game's own menu.
 
 Version: **0.1.0** — first release of a ground-up rewrite. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 

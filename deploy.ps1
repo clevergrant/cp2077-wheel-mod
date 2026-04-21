@@ -10,7 +10,7 @@
 #
 #   Direct mode (-Game <path>):
 #     Copies files straight into a Cyberpunk 2077 install directory. Fastest
-#     dev loop — no Vortex, no re-zip, no FOMOD prompts.
+#     dev loop - no Vortex, no re-zip, no FOMOD prompts.
 #     Example:
 #       powershell -ExecutionPolicy Bypass -File deploy.ps1 -Game "C:\GOG Games\Cyberpunk 2077"
 #
@@ -58,7 +58,6 @@ Info "Version: $version"
 
 $redsFiles = @(
   "gwheel_reds\gwheel_natives.reds",
-  "gwheel_reds\gwheel_vehicle_override.reds",
   "gwheel_reds\gwheel_settings.reds"
 )
 foreach ($r in $redsFiles) {
@@ -78,7 +77,7 @@ foreach ($f in $fomodFiles) {
 $dllPath = Join-Path $BuildDir "gwheel\$Config\gwheel.dll"
 
 function Invoke-Build {
-  if (-not (Test-Path "build.ps1")) { Fail "build.ps1 missing — can't build." }
+  if (-not (Test-Path "build.ps1")) { Fail "build.ps1 missing - can't build." }
   Info "Invoking build.ps1 -Config $Config -BuildDir $BuildDir"
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "build.ps1" -Config $Config -BuildDir $BuildDir
   if ($LASTEXITCODE -ne 0) { Fail "build.ps1 failed (exit $LASTEXITCODE). Fix compile errors before deploying." }
@@ -86,7 +85,7 @@ function Invoke-Build {
 
 if (-not (Test-Path $dllPath)) {
   if ($NoBuild) { Fail "DLL not found at $dllPath and -NoBuild was specified." }
-  Warn "DLL not found at $dllPath — running build first"
+  Warn "DLL not found at $dllPath - running build first"
   Invoke-Build
   if (-not (Test-Path $dllPath)) { Fail "build.ps1 completed but $dllPath still missing." }
 } elseif (-not $NoBuild) {
@@ -96,7 +95,7 @@ if (-not (Test-Path $dllPath)) {
     Select-Object -ExpandProperty LastWriteTime
   $newest = ($srcTimes | Measure-Object -Maximum).Maximum
   if ($newest -gt $dllTime) {
-    Info "Sources newer than DLL — rebuilding"
+    Info "Sources newer than DLL - rebuilding"
     Invoke-Build
   } else {
     Info "DLL is up to date; skipping build. Pass -Clean to force."
@@ -129,7 +128,7 @@ if ($Game) {
 
   # Warn if game is running (DLL will be locked).
   $running = Get-Process -Name "Cyberpunk2077" -ErrorAction SilentlyContinue
-  if ($running) { Fail "Cyberpunk 2077 is running — close it first (the DLL is locked while the game is open)." }
+  if ($running) { Fail "Cyberpunk 2077 is running - close it first (the DLL is locked while the game is open)." }
 
   # red4ext presence check.
   $red4ext = Join-Path $Game "red4ext\RED4ext.dll"
@@ -148,9 +147,10 @@ if ($Game) {
   if (-not (Test-Path $archiveXl)) {
     Warn "ArchiveXL not detected. Mod Settings depends on it, so the Settings page will not appear."
   }
-  $modSettings = Join-Path $Game "r6\scripts\mod_settings\ModSettings.reds"
-  if (-not (Test-Path $modSettings)) {
-    Warn "Mod Settings not detected. The wheel will work but the in-game Settings page will not appear."
+  $modSettingsDll = Join-Path $Game "red4ext\plugins\mod_settings\mod_settings.dll"
+  $modSettingsReds = Join-Path $Game "r6\scripts\mod_settings\ModSettings.reds"
+  if (-not (Test-Path $modSettingsDll) -and -not (Test-Path $modSettingsReds)) {
+    Warn "Mod Settings not detected (checked red4ext\plugins\mod_settings\ and r6\scripts\mod_settings\). The wheel will work but the in-game Settings page will not appear."
   }
 
   # Deploy.
@@ -168,6 +168,17 @@ if ($Game) {
   Copy-Item -Force $dllPath (Join-Path $pluginDir "gwheel.dll")
   Info "Deployed DLL -> $(Join-Path $pluginDir 'gwheel.dll')"
 
+  # Logitech Gaming Software / G HUB runtime check. The Logitech SDK the DLL
+  # is built against talks to either LGS or G HUB through a shared user-mode
+  # service; without it LogiSteeringInitialize will fail in-process and the
+  # pump thread will log retry warnings.
+  $ghub = Get-Process -Name "lghub","LCore" -ErrorAction SilentlyContinue
+  if (-not $ghub) {
+    Warn "Neither G HUB (lghub.exe) nor LGS (LCore.exe) is running. Start one before launching CP2077."
+  } else {
+    Info "Logitech runtime detected: $($ghub[0].ProcessName)"
+  }
+
   foreach ($r in $redsFiles) {
     $dest = Join-Path $scriptDir (Split-Path $r -Leaf)
     Copy-Item -Force $r $dest
@@ -181,7 +192,41 @@ if ($Game) {
       Remove-Item -Force $cache
       Info "Invalidated redscript cache: $cache (will recompile on next launch)"
     } catch {
-      Warn "Could not invalidate redscript cache — next launch may use stale compiled script. File: $cache"
+      Warn "Could not invalidate redscript cache - next launch may use stale compiled script. File: $cache"
+    }
+  }
+
+  # Expose the game's live red4ext log dir inside the repo via a directory
+  # junction. After one deploy, every subsequent game launch's fresh logs
+  # appear immediately under tools/sigfinder/runs/cp2077-logs/ with no copy
+  # step - dev tooling can grep/tail them directly.
+  $logDir = Join-Path $Game "red4ext\logs"
+  $repoRunsDir = Join-Path $repoRoot "tools\sigfinder\runs"
+  $junction = Join-Path $repoRunsDir "cp2077-logs"
+  if (-not (Test-Path $repoRunsDir)) { New-Item -ItemType Directory -Force -Path $repoRunsDir | Out-Null }
+  if (Test-Path $logDir) {
+    $reuse = $false
+    if (Test-Path $junction) {
+      $item = Get-Item $junction -Force
+      if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        if ($item.Target -and ($item.Target -ieq $logDir)) {
+          $reuse = $true
+          Info "Log junction already points at $logDir"
+        } else {
+          Remove-Item -Force $junction
+        }
+      } else {
+        Warn "tools\sigfinder\runs\cp2077-logs exists but is not a junction - leaving it alone"
+        $reuse = $true
+      }
+    }
+    if (-not $reuse) {
+      try {
+        New-Item -ItemType Junction -Path $junction -Target $logDir | Out-Null
+        Ok "Created log junction: $junction -> $logDir"
+      } catch {
+        Warn "Could not create log junction: $_"
+      }
     }
   }
 
@@ -189,14 +234,18 @@ if ($Game) {
   Ok "Deploy complete."
   Write-Host ""
   Write-Host "Next steps:" -ForegroundColor Cyan
-  Write-Host "  1. Launch Cyberpunk 2077. First launch after a .reds change is slow (30-60s) due to recompile."
-  Write-Host "  2. Check logs for load confirmation:"
-  Write-Host "       $(Join-Path $Game 'red4ext\logs\gwheel-*.log')"
-  Write-Host "     Look for:   [gwheel] loaded v$version"
-  Write-Host "     And then:   [gwheel] device acquired: <Model> (axes=N buttons=M FFB=yes/no)"
-  Write-Host "  3. Check redscript compile log (if the Settings page or vehicle hook breaks):"
-  Write-Host "       $(Join-Path $Game 'r6\cache\modded\final.redscripts.log')"
-  Write-Host "  4. In-game: Main Menu -> Settings -> Mod Settings -> G-series Wheel."
+  Write-Host '  1. Launch Cyberpunk 2077. First launch after a .reds change is slow (30 to 60 seconds) due to recompile.'
+  Write-Host '  2. Check logs for load confirmation:'
+  Write-Host ("       " + (Join-Path $Game 'red4ext\logs\gwheel-*.log'))
+  Write-Host ("     Look for:   [gwheel] loaded v" + $version)
+  Write-Host '                 [gwheel] Logitech Steering Wheel SDK v...'
+  Write-Host '                 [gwheel] wheel bound at SDK slot 0: "G923 ..."'
+  Write-Host '                 [gwheel] firing hello pulse (confirms FFB is live)'
+  Write-Host '                 [gwheel:hook] vehicle-input: pattern not configured - hook inactive. Run tools/sigfinder/sigfinder.py and update gwheel/src/sigs.h.'
+  Write-Host '     The hook-inactive line is EXPECTED until the sigfinder tool has been run against the current game patch.'
+  Write-Host '  3. Check redscript compile log (if the Settings page or vehicle hook breaks):'
+  Write-Host ("       " + (Join-Path $Game 'r6\cache\modded\final.redscripts.log'))
+  Write-Host '  4. In-game: Main Menu -> Settings -> Mod Settings -> G-series Wheel.'
   exit 0
 }
 
@@ -212,7 +261,7 @@ if (Test-Path $stagingDir) { Remove-Item -Recurse -Force $stagingDir }
 New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
 New-Item -ItemType Directory -Force -Path $distDir    | Out-Null
 
-# Layout for the FOMOD — source paths match what ModuleConfig.xml references.
+# Layout for the FOMOD - source paths match what ModuleConfig.xml references.
 New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "build")       | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "fomod")       | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "gwheel_reds") | Out-Null

@@ -1,12 +1,39 @@
 #include "plugin.h"
 #include "logging.h"
-#include "wheel_device.h"
-#include "ffb.h"
+#include "wheel.h"
+#include "button_map.h"
+#include "vehicle_hook.h"
 #include "config.h"
 #include "rtti.h"
+#include "rtti_dump.h"
+
+#include <atomic>
+#include <chrono>
+#include <thread>
 
 namespace gwheel
 {
+    namespace
+    {
+        std::atomic<bool> g_pumpRunning{false};
+        std::thread       g_pumpThread;
+
+        void PumpLoop()
+        {
+            using namespace std::chrono_literals;
+            log::Info("[gwheel] pump thread started (250 Hz)");
+            while (g_pumpRunning.load(std::memory_order_acquire))
+            {
+                wheel::Pump();
+                const auto snap = wheel::CurrentSnapshot();
+                if (snap.connected)
+                    button_map::OnWheelTick(snap.buttons);
+                std::this_thread::sleep_for(4ms);
+            }
+            log::Info("[gwheel] pump thread stopped");
+        }
+    }
+
     PluginContext& Ctx()
     {
         static PluginContext ctx;
@@ -19,65 +46,39 @@ namespace gwheel
         ctx.handle = aHandle;
         ctx.sdk = aSdk;
 
-        if (!aSdk)
-        {
-            // We have no logger yet — nothing we can say.
-            return;
-        }
-        if (!aSdk->logger)
-        {
-            // The SDK is present but logging isn't wired up. Continue; nothing
-            // good will come of aborting here.
-        }
-
         log::InfoF("[gwheel] ========================================");
         log::InfoF("[gwheel] loaded v%s", kVersionString);
         log::InfoF("[gwheel] ========================================");
 
-        log::Info("[gwheel] step 1/4: loading config");
+        log::Info("[gwheel] step 1/5: loading config");
         config::Load();
 
-        log::Info("[gwheel] step 2/4: registering redscript natives");
+        log::Info("[gwheel] step 2/5: registering redscript natives");
         rtti::Register();
 
-        log::Info("[gwheel] step 3/4: acquiring wheel device");
-        const bool gotDevice = device::Init();
-        if (!gotDevice)
-        {
-            log::Warn("[gwheel] no wheel acquired — mod will idle. The game will play normally "
-                      "with mouse/keyboard/gamepad. If you expected a wheel, check: "
-                      "(a) wheel is plugged in, (b) G HUB is running, (c) on G29/G923, the PS/Xbox/PC switch is set correctly.");
-        }
+        log::Info("[gwheel] step 3/5: initializing Logitech SDK wheel layer (deferred)");
+        wheel::Init();
 
-        log::Info("[gwheel] step 4/4: initializing force feedback");
-        if (gotDevice)
-        {
-            if (ffb::Init())
-            {
-                log::Info("[gwheel] force feedback online");
-            }
-            else
-            {
-                log::Info("[gwheel] force feedback unavailable — input-only mode");
-            }
-        }
-        else
-        {
-            log::Debug("[gwheel] skipping FFB init (no device)");
-        }
+        log::Info("[gwheel] step 4/5: installing vehicle-input detour (hash-resolved)");
+        vehicle_hook::Init();
 
-        log::InfoF("[gwheel] ready. Device=%s FFB=%s Plugin=%s",
-                   device::IsAcquired() ? "yes" : "no",
-                   ffb::IsReady() ? "yes" : "no",
-                   kVersionString);
+        log::Info("[gwheel] step 5/5: starting 250 Hz pump thread");
+        g_pumpRunning.store(true, std::memory_order_release);
+        g_pumpThread = std::thread(PumpLoop);
+
+        log::InfoF("[gwheel] ready: hook=%s",
+                   vehicle_hook::IsInstalled() ? "installed" : "not-installed");
     }
 
     void OnUnload()
     {
         log::Info("[gwheel] unloading");
 
-        ffb::Shutdown();
-        device::Shutdown();
+        g_pumpRunning.store(false, std::memory_order_release);
+        if (g_pumpThread.joinable()) g_pumpThread.join();
+
+        vehicle_hook::Shutdown();
+        wheel::Shutdown();
 
         auto& ctx = Ctx();
         ctx.handle = {};

@@ -1,6 +1,6 @@
 #include "config.h"
 #include "logging.h"
-#include "ffb.h"
+#include "button_map.h"
 
 #include <windows.h>
 
@@ -112,10 +112,78 @@ namespace gwheel::config
             emitVeh("motorcycle", c.motorcycle, false);
             emitVeh("truck", c.truck, false);
             emitVeh("van", c.van, true);
-            out << "  }\n";
+            out << "  },\n";
+
+            out << "  \"buttons\": [";
+            for (size_t i = 0; i < c.buttons.size(); ++i)
+            {
+                const auto& b = c.buttons[i];
+                if (i) out << ", ";
+                out << "{\"button\": " << b.button << ", \"action\": ";
+                std::string esc;
+                EscapeJsonTo(esc, b.action);
+                out << esc << "}";
+            }
+            out << "]\n";
 
             out << "}\n";
             return out.str();
+        }
+
+        // Parse the "buttons" array. Tolerant and schema-light - we accept any
+        // sequence of "{...}" records and pick out the button+action fields by
+        // substring, same approach as the rest of this mini-parser.
+        void ParseButtons(const std::string& text, std::vector<ButtonBinding>& out)
+        {
+            out.clear();
+            size_t arr = text.find("\"buttons\"");
+            if (arr == std::string::npos) return;
+            size_t lbrack = text.find('[', arr);
+            if (lbrack == std::string::npos) return;
+            size_t rbrack = text.find(']', lbrack);
+            if (rbrack == std::string::npos) return;
+
+            size_t i = lbrack + 1;
+            while (i < rbrack)
+            {
+                size_t lbrace = text.find('{', i);
+                if (lbrace == std::string::npos || lbrace >= rbrack) break;
+                size_t rbrace = text.find('}', lbrace);
+                if (rbrace == std::string::npos || rbrace > rbrack) break;
+
+                std::string_view record(text.data() + lbrace, rbrace - lbrace + 1);
+
+                ButtonBinding b;
+                auto keyPos = record.find("\"button\"");
+                if (keyPos != std::string_view::npos)
+                {
+                    auto colon = record.find(':', keyPos);
+                    if (colon != std::string_view::npos)
+                    {
+                        char* endp = nullptr;
+                        b.button = static_cast<int32_t>(std::strtol(record.data() + colon + 1, &endp, 10));
+                    }
+                }
+                auto actPos = record.find("\"action\"");
+                if (actPos != std::string_view::npos)
+                {
+                    auto colon = record.find(':', actPos);
+                    if (colon != std::string_view::npos)
+                    {
+                        auto q1 = record.find('"', colon);
+                        if (q1 != std::string_view::npos)
+                        {
+                            auto q2 = record.find('"', q1 + 1);
+                            if (q2 != std::string_view::npos)
+                                b.action.assign(record.data() + q1 + 1, q2 - q1 - 1);
+                        }
+                    }
+                }
+                if (b.button >= 0 && !b.action.empty())
+                    out.push_back(std::move(b));
+
+                i = rbrace + 1;
+            }
         }
 
         // Case-sensitive "find `"key"` after the last occurrence of `section`".
@@ -201,6 +269,8 @@ namespace gwheel::config
             vehExtract("motorcycle", c.motorcycle);
             vehExtract("truck", c.truck);
             vehExtract("van", c.van);
+
+            ParseButtons(text, c.buttons);
         }
 
         void SaveLocked(const Config& c)
@@ -227,8 +297,13 @@ namespace gwheel::config
         void ApplyDerived(const Config& c)
         {
             // Anything that must take effect immediately when config changes.
-            ffb::SetGlobalStrength(c.ffb.enabled ? (c.ffb.strengthPct / 100.0f) : 0.f);
             log::SetDebugEnabled(c.ffb.debugLogging);
+
+            std::vector<button_map::Binding> bm;
+            bm.reserve(c.buttons.size());
+            for (const auto& b : c.buttons)
+                bm.push_back({ b.button, b.action });
+            button_map::ReplaceAll(bm);
         }
 
         void Publish(const Config& next)
@@ -324,4 +399,32 @@ namespace gwheel::config
     void SetOverrideSensitivity(float v)    { Mutate([&](Config& c){ c.override_.sensitivity = std::clamp(v, 0.25f, 2.0f); }); }
     void SetOverrideRangeDeg(int32_t v)     { Mutate([&](Config& c){ c.override_.rangeDeg = std::clamp(v, 200, 900); }); }
     void SetOverrideCenteringSpringPct(int32_t v) { Mutate([&](Config& c){ c.override_.centeringSpringPct = std::clamp(v, 0, 100); }); }
+
+    void SetButtonBinding(int32_t button, std::string_view action)
+    {
+        if (button < 0 || button >= 32)
+        {
+            log::WarnF("[gwheel] SetButtonBinding: button %d out of range [0..32)", button);
+            return;
+        }
+        std::string act(action);
+        Mutate([&](Config& c) {
+            for (auto& b : c.buttons)
+            {
+                if (b.button == button)
+                {
+                    if (act.empty()) { b.button = -1; } // marks for filtering below
+                    else             { b.action = act; }
+                    goto compact;
+                }
+            }
+            if (!act.empty()) c.buttons.push_back({ button, act });
+        compact:
+            c.buttons.erase(std::remove_if(c.buttons.begin(), c.buttons.end(),
+                [](const ButtonBinding& b){ return b.button < 0 || b.action.empty(); }),
+                c.buttons.end());
+        });
+    }
+
+    void ClearButtonBinding(int32_t button) { SetButtonBinding(button, {}); }
 }

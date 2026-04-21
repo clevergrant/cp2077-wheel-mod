@@ -16,8 +16,6 @@
           destination="red4ext\plugins\gwheel\gwheel.dll"/>
     <file source="gwheel_reds\gwheel_natives.reds"
           destination="r6\scripts\gwheel\gwheel_natives.reds"/>
-    <file source="gwheel_reds\gwheel_vehicle_override.reds"
-          destination="r6\scripts\gwheel\gwheel_vehicle_override.reds"/>
     <file source="gwheel_reds\gwheel_settings.reds"
           destination="r6\scripts\gwheel\gwheel_settings.reds"/>
   </requiredInstallFiles>
@@ -67,6 +65,21 @@
                       <type name="Optional"/>
                     </pattern>
                   </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+
+          </plugins>
+        </group>
+
+        <group name="Runtime (required)" type="SelectAny">
+          <plugins order="Explicit">
+
+            <plugin name="Logitech G HUB or Gaming Software">
+              <description>This mod reads your wheel via the Logitech Steering Wheel SDK. That SDK needs Logitech G HUB (or the older Logitech Gaming Software) running in the background - it provides the user-mode service the SDK talks to. Install G HUB from https://www.logitech.com/innovation/g-hub.html and make sure your wheel shows up in it before launching Cyberpunk 2077. This is almost certainly already installed if you have a Logitech wheel.</description>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Required"/>
                 </dependencyType>
               </typeDescriptor>
             </plugin>

@@ -10,18 +10,16 @@
 // contains every knob that duplicates a G HUB setting; all of those fields
 // are gated on overrideGHub.
 
-public class GWheelSettings extends ScriptableService {
+public class GWheelSettings extends IScriptable {
 
   // ---- Input --------------------------------------------------------------
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Wheel-Input")
   @runtimeProperty("ModSettings.displayName", "Enable wheel input")
   @runtimeProperty("ModSettings.description", "Master toggle. When off, the mod stops injecting wheel values into vehicle input.")
   let inputEnabled: Bool = true;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Wheel-Input")
   @runtimeProperty("ModSettings.displayName", "Steering deadzone (%)")
   @runtimeProperty("ModSettings.description", "Small centre deadzone applied after G HUB's own curve.")
   @runtimeProperty("ModSettings.min", "0")
@@ -31,7 +29,6 @@ public class GWheelSettings extends ScriptableService {
   let steerDeadzonePct: Int32 = 2;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Wheel-Input")
   @runtimeProperty("ModSettings.displayName", "Throttle deadzone (%)")
   @runtimeProperty("ModSettings.min", "0")
   @runtimeProperty("ModSettings.max", "20")
@@ -40,7 +37,6 @@ public class GWheelSettings extends ScriptableService {
   let throttleDeadzonePct: Int32 = 2;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Wheel-Input")
   @runtimeProperty("ModSettings.displayName", "Brake deadzone (%)")
   @runtimeProperty("ModSettings.min", "0")
   @runtimeProperty("ModSettings.max", "20")
@@ -48,23 +44,14 @@ public class GWheelSettings extends ScriptableService {
   @runtimeProperty("ModSettings.dependency", "inputEnabled")
   let brakeDeadzonePct: Int32 = 2;
 
-  @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Wheel-Input")
-  @runtimeProperty("ModSettings.displayName", "Response curve")
-  @runtimeProperty("ModSettings.displayValues", "\"Default\", \"Subdued\", \"Sharp\"")
-  @runtimeProperty("ModSettings.dependency", "inputEnabled")
-  let responseCurve: GWheelResponseCurve = GWheelResponseCurve.Default;
-
   // ---- Force feedback -----------------------------------------------------
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Wheel-FFB")
   @runtimeProperty("ModSettings.displayName", "Enable force feedback")
   @runtimeProperty("ModSettings.description", "Plugin-driven effects only (collision, surface texture). Centering spring stays with G HUB.")
   let ffbEnabled: Bool = true;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Wheel-FFB")
   @runtimeProperty("ModSettings.displayName", "FFB strength (%)")
   @runtimeProperty("ModSettings.description", "Scales plugin-generated effects. Does not affect G HUB's centering spring.")
   @runtimeProperty("ModSettings.min", "0")
@@ -74,20 +61,18 @@ public class GWheelSettings extends ScriptableService {
   let ffbStrengthPct: Int32 = 80;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Wheel-FFB")
   @runtimeProperty("ModSettings.displayName", "Debug logging")
+  @runtimeProperty("ModSettings.description", "Enables verbose plugin logging. Find logs at red4ext/logs/gwheel-*.log.")
   let ffbDebugLogging: Bool = false;
 
   // ---- Advanced (override G HUB) -----------------------------------------
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Wheel-Advanced")
   @runtimeProperty("ModSettings.displayName", "Override G HUB settings")
   @runtimeProperty("ModSettings.description", "When ON, this mod takes control of sensitivity, rotation range, and centering spring. When OFF (default), those remain managed by Logitech G HUB.")
   let overrideGHub: Bool = false;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Wheel-Advanced")
   @runtimeProperty("ModSettings.displayName", "Steering sensitivity")
   @runtimeProperty("ModSettings.min", "0.25")
   @runtimeProperty("ModSettings.max", "2.0")
@@ -96,7 +81,6 @@ public class GWheelSettings extends ScriptableService {
   let overrideSensitivity: Float = 1.0;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Wheel-Advanced")
   @runtimeProperty("ModSettings.displayName", "Operating range (degrees)")
   @runtimeProperty("ModSettings.min", "200")
   @runtimeProperty("ModSettings.max", "900")
@@ -105,7 +89,6 @@ public class GWheelSettings extends ScriptableService {
   let overrideRangeDeg: Int32 = 900;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Wheel-Advanced")
   @runtimeProperty("ModSettings.displayName", "Centering spring strength (%)")
   @runtimeProperty("ModSettings.min", "0")
   @runtimeProperty("ModSettings.max", "100")
@@ -113,24 +96,17 @@ public class GWheelSettings extends ScriptableService {
   @runtimeProperty("ModSettings.dependency", "overrideGHub")
   let overrideCenteringSpringPct: Int32 = 50;
 
-  // ---- Lifecycle ---------------------------------------------------------
+  // ---- Listener callbacks (invoked by Mod Settings, NOT cb funcs) --------
 
-  private cb func OnLoad() {
-    ModSettings.RegisterListenerToClass(this);
-    ModSettings.RegisterListenerToModifications(this);
+  public func OnModSettingsChange() -> Void {
     this.Push();
   }
 
-  public cb func OnModSettingsChange() -> Void {
-    this.Push();
-  }
-
-  private final func Push() -> Void {
+  public func Push() -> Void {
     GWheel_SetInputEnabled(this.inputEnabled);
     GWheel_SetSteerDeadzonePct(this.steerDeadzonePct);
     GWheel_SetThrottleDeadzonePct(this.throttleDeadzonePct);
     GWheel_SetBrakeDeadzonePct(this.brakeDeadzonePct);
-    GWheel_SetResponseCurve(GWheelResponseCurve_ToString(this.responseCurve));
 
     GWheel_SetFfbEnabled(this.ffbEnabled);
     GWheel_SetFfbStrengthPct(this.ffbStrengthPct);
@@ -143,16 +119,21 @@ public class GWheelSettings extends ScriptableService {
   }
 }
 
-enum GWheelResponseCurve {
-  Default = 0,
-  Subdued = 1,
-  Sharp = 2,
-}
+// Attach our settings instance to the player puppet so it lives for the
+// session. On attach, register with Mod Settings and push current values to
+// the native plugin.
 
-public static func GWheelResponseCurve_ToString(c: GWheelResponseCurve) -> String {
-  switch c {
-    case GWheelResponseCurve.Subdued: return "subdued";
-    case GWheelResponseCurve.Sharp: return "sharp";
-    default: return "default";
+@addField(PlayerPuppet)
+public let m_gwheelSettings: ref<GWheelSettings>;
+
+@wrapMethod(PlayerPuppet)
+protected cb func OnGameAttached() -> Bool {
+  let result: Bool = wrappedMethod();
+  if !IsDefined(this.m_gwheelSettings) {
+    this.m_gwheelSettings = new GWheelSettings();
+    ModSettings.RegisterListenerToClass(this.m_gwheelSettings);
+    ModSettings.RegisterListenerToModifications(this.m_gwheelSettings);
+    this.m_gwheelSettings.Push();
   }
+  return result;
 }

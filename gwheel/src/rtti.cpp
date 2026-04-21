@@ -1,9 +1,11 @@
 #include "rtti.h"
 #include "config.h"
-#include "vehicle_hooks.h"
-#include "wheel_device.h"
+#include "wheel.h"
+#include "button_map.h"
+#include "vehicle_hook.h"
 #include "plugin.h"
 #include "logging.h"
+#include "rtti_dump.h"
 
 #include <RED4ext/RED4ext.hpp>
 
@@ -14,8 +16,6 @@ namespace gwheel::rtti
 {
     namespace
     {
-        // -------- Helper: read a String (CString) parameter. ------------------
-
         std::string ReadString(RED4ext::CStackFrame* aFrame)
         {
             RED4ext::CString s;
@@ -23,45 +23,46 @@ namespace gwheel::rtti
             return std::string(s.c_str());
         }
 
-        // -------- Read-only natives -----------------------------------------------
+        // -------- Read-only natives -----------------------------------------
 
         void GetVersion(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED4ext::CString* aOut, int64_t)
         {
-            aFrame->code++; // ParamEnd
+            aFrame->code++;
             if (aOut) *aOut = RED4ext::CString(kVersionString);
         }
 
         void IsPluginReady(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
         {
             aFrame->code++;
-            if (aOut) *aOut = device::IsAcquired();
+            if (aOut) *aOut = wheel::IsReady();
         }
 
         void GetDeviceInfo(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED4ext::CString* aOut, int64_t)
         {
             aFrame->code++;
             if (!aOut) return;
-            const auto& caps = device::GetCaps();
-            if (!caps.model)
+            if (!wheel::IsReady())
             {
-                *aOut = RED4ext::CString("no device");
+                *aOut = RED4ext::CString("no wheel connected (Logitech SDK has not bound a device yet)");
                 return;
             }
-            char buf[192];
+            const auto& caps = wheel::GetCaps();
+            char buf[512];
             std::snprintf(buf, sizeof(buf),
-                "%.*s (PID 0x%04X) — FFB: %s, clutch: %s, shifter: %s",
-                static_cast<int>(caps.model->name.size()), caps.model->name.data(),
-                caps.pid,
-                caps.ffb_runtime ? "yes" : "no",
-                caps.model->has_clutch ? "yes" : "no",
-                caps.model->has_shifter ? "yes" : "no");
+                          "%s (%d deg, FFB=%s, SDK=%d.%d.%d) -> hook:%s fireCount=%llu",
+                          caps.productName,
+                          caps.operatingRangeDeg,
+                          caps.hasFFB ? "yes" : "no",
+                          caps.sdkMajor, caps.sdkMinor, caps.sdkBuild,
+                          vehicle_hook::IsInstalled() ? "installed" : "not-installed",
+                          static_cast<unsigned long long>(vehicle_hook::FireCount()));
             *aOut = RED4ext::CString(buf);
         }
 
         void HasFFB(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
         {
             aFrame->code++;
-            if (aOut) *aOut = device::GetCaps().ffb_runtime;
+            if (aOut) *aOut = wheel::IsReady() && wheel::GetCaps().hasFFB;
         }
 
         void ReadConfig(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED4ext::CString* aOut, int64_t)
@@ -70,19 +71,7 @@ namespace gwheel::rtti
             if (aOut) *aOut = RED4ext::CString(config::ReadAsJson().c_str());
         }
 
-        // -------- Vehicle input hot path --------------------------------------
-
-        void MaybeOverrideFloat(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, float* aOut, int64_t)
-        {
-            RED4ext::CName inputName;
-            float original = 0.f;
-            RED4ext::GetParameter(aFrame, &inputName);
-            RED4ext::GetParameter(aFrame, &original);
-            aFrame->code++;
-            if (aOut) *aOut = vehicle::MaybeOverrideFloat(inputName, original);
-        }
-
-        // -------- Config setters ----------------------------------------------
+        // -------- Config setters --------------------------------------------
 
         void SetInputEnabled(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
         {
@@ -115,15 +104,57 @@ namespace gwheel::rtti
             if (aOut) *aOut = true;
         }
 
-        void SetResponseCurve(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        // -------- Button bindings -------------------------------------------
+
+        void SetButtonBinding(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
         {
-            auto s = ReadString(aFrame);
+            int32_t button = -1;
+            RED4ext::CString action;
+            RED4ext::GetParameter(aFrame, &button);
+            RED4ext::GetParameter(aFrame, &action);
             aFrame->code++;
-            config::SetResponseCurve(s);
+            config::SetButtonBinding(button, std::string_view(action.c_str()));
             if (aOut) *aOut = true;
         }
 
-        // -------- Registration --------------------------------------------------
+        void ClearButtonBinding(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        {
+            int32_t button = -1;
+            RED4ext::GetParameter(aFrame, &button);
+            aFrame->code++;
+            config::ClearButtonBinding(button);
+            if (aOut) *aOut = true;
+        }
+
+        void GetButtonBinding(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED4ext::CString* aOut, int64_t)
+        {
+            int32_t button = -1;
+            RED4ext::GetParameter(aFrame, &button);
+            aFrame->code++;
+            if (aOut) *aOut = RED4ext::CString(button_map::Get(button).c_str());
+        }
+
+        void IsButtonPressed(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        {
+            int32_t button = -1;
+            RED4ext::GetParameter(aFrame, &button);
+            aFrame->code++;
+            if (aOut) *aOut = button_map::IsPressed(button);
+        }
+
+        void GetLastPressedButton(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, int32_t* aOut, int64_t)
+        {
+            aFrame->code++;
+            if (aOut) *aOut = button_map::LastPressed();
+        }
+
+        void GetButtonBindingsJson(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED4ext::CString* aOut, int64_t)
+        {
+            aFrame->code++;
+            if (aOut) *aOut = RED4ext::CString(button_map::SerializeJson().c_str());
+        }
+
+        // -------- Registration ----------------------------------------------
 
         using FuncFlags = RED4ext::CBaseFunction::Flags;
 
@@ -146,18 +177,22 @@ namespace gwheel::rtti
         {
             auto rtti = RED4ext::CRTTISystem::Get();
 
-            RegisterGlobal(rtti, "GWheel_GetVersion",      reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&GetVersion),      "String", {});
-            RegisterGlobal(rtti, "GWheel_IsPluginReady",   reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&IsPluginReady),   "Bool",   {});
-            RegisterGlobal(rtti, "GWheel_GetDeviceInfo",   reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&GetDeviceInfo),   "String", {});
-            RegisterGlobal(rtti, "GWheel_HasFFB",          reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&HasFFB),          "Bool",   {});
-            RegisterGlobal(rtti, "GWheel_ReadConfig",      reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&ReadConfig),      "String", {});
+            RegisterGlobal(rtti, "GWheel_GetVersion",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&GetVersion),
+                           "String", {});
+            RegisterGlobal(rtti, "GWheel_IsPluginReady",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&IsPluginReady),
+                           "Bool", {});
+            RegisterGlobal(rtti, "GWheel_GetDeviceInfo",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&GetDeviceInfo),
+                           "String", {});
+            RegisterGlobal(rtti, "GWheel_HasFFB",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&HasFFB),
+                           "Bool", {});
+            RegisterGlobal(rtti, "GWheel_ReadConfig",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&ReadConfig),
+                           "String", {});
 
-            RegisterGlobal(rtti, "GWheel_MaybeOverrideFloat",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&MaybeOverrideFloat),
-                           "Float",
-                           {{ "CName", "inputName" }, { "Float", "original" }});
-
-            // Setters — all return Bool so redscript can pipeline without ignoring.
             RegisterGlobal(rtti, "GWheel_SetInputEnabled",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInputEnabled),
                            "Bool", {{ "Bool", "v" }});
@@ -170,9 +205,6 @@ namespace gwheel::rtti
             RegisterGlobal(rtti, "GWheel_SetBrakeDeadzonePct",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetBrakeDeadzonePct>),
                            "Bool", {{ "Int32", "pct" }});
-            RegisterGlobal(rtti, "GWheel_SetResponseCurve",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetResponseCurve),
-                           "Bool", {{ "String", "curve" }});
 
             RegisterGlobal(rtti, "GWheel_SetFfbEnabled",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetFfbEnabled>),
@@ -197,7 +229,30 @@ namespace gwheel::rtti
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetOverrideCenteringSpringPct>),
                            "Bool", {{ "Int32", "pct" }});
 
-            log::Info("[gwheel] 17 native functions registered for redscript");
+            RegisterGlobal(rtti, "GWheel_SetButtonBinding",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetButtonBinding),
+                           "Bool", {{ "Int32", "button" }, { "String", "action" }});
+            RegisterGlobal(rtti, "GWheel_ClearButtonBinding",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&ClearButtonBinding),
+                           "Bool", {{ "Int32", "button" }});
+            RegisterGlobal(rtti, "GWheel_GetButtonBinding",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&GetButtonBinding),
+                           "String", {{ "Int32", "button" }});
+            RegisterGlobal(rtti, "GWheel_IsButtonPressed",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&IsButtonPressed),
+                           "Bool", {{ "Int32", "button" }});
+            RegisterGlobal(rtti, "GWheel_GetLastPressedButton",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&GetLastPressedButton),
+                           "Int32", {});
+            RegisterGlobal(rtti, "GWheel_GetButtonBindingsJson",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&GetButtonBindingsJson),
+                           "String", {});
+
+            log::Info("[gwheel] native functions registered for redscript");
+
+            // BISECT: RTTI dump disabled. Still registering natives above;
+            // just skipping the full class enumeration pass.
+            log::Info("[gwheel] RTTI dump DISABLED this build (bisect)");
         }
     }
 
@@ -206,8 +261,7 @@ namespace gwheel::rtti
         auto rtti = RED4ext::CRTTISystem::Get();
         if (!rtti)
         {
-            log::Error("[gwheel] CRTTISystem::Get() returned null — native functions will not be registered. "
-                       "This means RED4ext is loaded but the game's scripting system isn't ready yet.");
+            log::Error("[gwheel] CRTTISystem::Get() returned null - native functions will not be registered.");
             return;
         }
         rtti->AddRegisterCallback(RegisterTypes);
