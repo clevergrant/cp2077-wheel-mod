@@ -20,21 +20,24 @@ namespace gwheel::wheel
 {
     namespace
     {
-        // Normalize a DIJOYSTATE2 LONG axis (0..65535 as seen via the Logitech
-        // SDK which feeds DirectInput ranges) into the requested output range.
-        // bipolar=true: center=0x8000 -> 0.0f, extents -> -1.0f .. +1.0f.
-        // bipolar=false: rest=0xFFFF -> 0.0f, pressed=0x0000 -> 1.0f
-        // (SDK gives classic DI wheel convention where idle=max, press=min).
+        // Normalize a DIJOYSTATE2 LONG axis. The Logi SDK for the G923
+        // returns bipolar signed 16-bit values in [-32768, +32767]
+        // (verified empirically 2026-04-21 via diagnostic logging).
+        //
+        // Steer: center=0, full-left=-32768, full-right=+32767.
+        // Pedals: idle=+32767, fully-pressed=-32768.
         float NormalizePedal(LONG v)
         {
-            const float t = static_cast<float>(v) / 65535.f;
-            return std::clamp(1.f - t, 0.f, 1.f);
+            constexpr float kMax = 32767.f;
+            constexpr float kRange = 65535.f; // kMax - kMin = 32767 - (-32768)
+            const float t = (kMax - static_cast<float>(v)) / kRange;
+            return std::clamp(t, 0.f, 1.f);
         }
 
         float NormalizeSteer(LONG v)
         {
-            const float t = static_cast<float>(v) / 65535.f;
-            return std::clamp(t * 2.f - 1.f, -1.f, 1.f);
+            constexpr float kMax = 32767.f;
+            return std::clamp(static_cast<float>(v) / kMax, -1.f, 1.f);
         }
 
         struct State
@@ -193,33 +196,44 @@ namespace gwheel::wheel
 
                 // Two triplets: R L R, L R L. Final step centers.
                 // 150 BPM: quarter note = 400ms. Rhythm per measure is
-                // quarter quarter quarter rest, so each triplet plays three
-                // beats then rests one full beat before the next triplet.
+                // quarter quarter quarter rest. Each beat fires a short
+                // kick of force then releases for the remainder of the beat
+                // so the pulse feels like a tap rather than a held push.
                 constexpr int kTriplets[2][3] = {
                     { +1, -1, +1 },   // R L R
                     { -1, +1, -1 },   // L R L
                 };
-                constexpr auto kBeatMs    = 400ms;  // quarter note @ 150 BPM
-                constexpr auto kRestMs    = 400ms;  // quarter rest
-                constexpr int  kMagnitude = 45;     // percent
+                constexpr auto kPulseMs   = 80ms;               // active kick
+                constexpr auto kBeatMs    = 400ms;              // quarter @ 150 BPM
+                constexpr auto kGapMs     = kBeatMs - kPulseMs; // silence within beat
+                constexpr auto kRestMs    = 400ms;              // quarter rest between triplets
+                constexpr int  kMagnitude = 45;                 // percent
 
                 for (int t = 0; t < 2; ++t)
                 {
                     for (int b = 0; b < 3; ++b)
                     {
                         LogiPlayConstantForce(idx, kTriplets[t][b] * kMagnitude);
-                        std::this_thread::sleep_for(kBeatMs);
+                        std::this_thread::sleep_for(kPulseMs);
+                        LogiStopConstantForce(idx);
+                        std::this_thread::sleep_for(kGapMs);
                     }
-                    LogiStopConstantForce(idx);
                     std::this_thread::sleep_for(kRestMs);
                 }
 
-                // Final step: center the wheel with a spring, hold for 3s,
-                // then release all forces so the wheel is free to move under
-                // the user's hand (or under game-driven FFB later).
+                // Final step: center the wheel with a spring + damper, hold
+                // for 3s, then release all forces so the wheel is free to
+                // move under the user's hand (or under game-driven FFB
+                // later). The damper is what actually kills the momentum of
+                // the wheel snapping back to center - spring alone lets it
+                // oscillate around 0 for a while.
                 LogiStopConstantForce(idx);
-                LogiPlaySpringForce(idx, 0, 100, 80);
+                const bool springOk = LogiPlaySpringForce(idx, 0, 100, 80);
+                const bool damperOk = LogiPlayDamperForce(idx, 60);
+                log::InfoF("[gwheel] hello centering begin (spring=%d damper=%d) - holding 3s",
+                           springOk ? 1 : 0, damperOk ? 1 : 0);
                 std::this_thread::sleep_for(3000ms);
+                log::Info("[gwheel] hello centering end - releasing forces");
                 LogiStopSpringForce(idx);
                 LogiStopConstantForce(idx);
                 LogiStopDamperForce(idx);
