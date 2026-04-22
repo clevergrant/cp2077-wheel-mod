@@ -27,3 +27,4 @@ endif()
 
 add_subdirectory(gwheel/vendor/RED4ext.SDK EXCLUDE_FROM_ALL)
 add_subdirectory(gwheel)
+add_subdirectory(tools/wheel_reset)

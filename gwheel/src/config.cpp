@@ -397,7 +397,7 @@ namespace gwheel::config
 
     void SetOverrideEnabled(bool v)         { Mutate([&](Config& c){ c.override_.enabled = v; }); }
     void SetOverrideSensitivity(float v)    { Mutate([&](Config& c){ c.override_.sensitivity = std::clamp(v, 0.25f, 2.0f); }); }
-    void SetOverrideRangeDeg(int32_t v)     { Mutate([&](Config& c){ c.override_.rangeDeg = std::clamp(v, 200, 900); }); }
+    void SetOverrideRangeDeg(int32_t v)     { Mutate([&](Config& c){ c.override_.rangeDeg = std::clamp(v, 40, 900); }); }
     void SetOverrideCenteringSpringPct(int32_t v) { Mutate([&](Config& c){ c.override_.centeringSpringPct = std::clamp(v, 0, 100); }); }
 
     void SetButtonBinding(int32_t button, std::string_view action)

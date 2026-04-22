@@ -1,6 +1,7 @@
 #include "wheel.h"
 #include "logging.h"
 #include "device_table.h"
+#include "config.h"
 
 #define DIRECTINPUT_VERSION 0x0800
 #include <windows.h>
@@ -56,6 +57,18 @@ namespace gwheel::wheel
 
             std::atomic<uint32_t> initAttempts{0};
             std::atomic<bool>     helloFired{false};
+
+            // G HUB's operating range captured at bind time, so we can hand
+            // the wheel back cleanly when the override toggle flips off.
+            std::atomic<int>      originalRangeDeg{0};
+            std::atomic<bool>     haveOriginalRange{false};
+
+            // Last values pushed to the SDK by ApplyOverrides. -1 means "not
+            // yet pushed". Settings are pause-menu-only so races here are
+            // benign; atomics keep it simple without needing a mutex.
+            std::atomic<int>      lastRangeDeg{-1};
+            std::atomic<int>      lastSpringPct{-1};
+            std::atomic<bool>     lastOverrideEnabled{false};
         };
 
         State& S() { static State s; return s; }
@@ -315,6 +328,107 @@ namespace gwheel::wheel
 
             return true;
         }
+
+        // Range limits we expose to the user. G-series wheels (G29/G920/G923)
+        // support hardware ranges down to ~40 deg and up to 900 deg.
+        constexpr int kMinRangeDeg = 40;
+        constexpr int kMaxRangeDeg = 900;
+
+        // Push config::override_ changes down to the Logitech SDK. Called
+        // once per pump tick after the wheel is bound.
+        //
+        // Strictly edge-triggered. When override is off and has never been
+        // turned on this session, this function does nothing at all — G HUB
+        // stays in complete control of the wheel. SDK writes only happen on:
+        //   - off -> on edge (apply range + spring, capture G HUB's pre-
+        //     override range so we can restore later)
+        //   - on -> off edge (stop spring, restore captured range)
+        //   - config value changed while on (push the delta)
+        //
+        // Division of labor:
+        //   - hardware operating range: LogiSetOperatingRange / restored from
+        //     the value captured at first off->on edge this session
+        //   - centering spring: continuous LogiPlaySpringForce / Stop
+        //   - sensitivity: NOT applied here; vehicle_hook reads it per-tick
+        //     and multiplies the normalized steer before writing the input.
+        void ApplyOverrides(int idx)
+        {
+            auto& st = S();
+            const auto cfg = config::Current();
+            const bool enabled = cfg.override_.enabled;
+            const int  range   = std::clamp(cfg.override_.rangeDeg, kMinRangeDeg, kMaxRangeDeg);
+            const int  spring  = std::clamp(cfg.override_.centeringSpringPct, 0, 100);
+
+            const bool wasEnabled = st.lastOverrideEnabled.load(std::memory_order_relaxed);
+            const int  lastRange  = st.lastRangeDeg.load(std::memory_order_relaxed);
+            const int  lastSpring = st.lastSpringPct.load(std::memory_order_relaxed);
+            const bool edgeOn     = enabled && !wasEnabled;
+            const bool edgeOff    = !enabled && wasEnabled;
+
+            if (enabled)
+            {
+                if (edgeOn)
+                {
+                    // Capture G HUB's current range so we can restore it on
+                    // edgeOff. We do this here (not at bind) so that a user
+                    // who never touches override never has us read or write
+                    // SDK range state at all.
+                    int current = 0;
+                    if (LogiGetOperatingRange(idx, current) && current > 0)
+                    {
+                        st.originalRangeDeg.store(current, std::memory_order_release);
+                        st.haveOriginalRange.store(true, std::memory_order_release);
+                        log::InfoF("[gwheel] override ON: captured pre-override range = %d deg",
+                                   current);
+                    }
+                    else
+                    {
+                        log::Warn("[gwheel] override ON: LogiGetOperatingRange failed; "
+                                  "will not be able to restore G HUB's range on override-off");
+                    }
+                }
+
+                if (edgeOn || range != lastRange)
+                {
+                    const bool ok = LogiSetOperatingRange(idx, range);
+                    log::InfoF("[gwheel] override: LogiSetOperatingRange(%d deg) -> %s",
+                               range, ok ? "ok" : "FAILED");
+                    st.lastRangeDeg.store(range, std::memory_order_relaxed);
+                }
+                if (edgeOn || spring != lastSpring)
+                {
+                    // offset=0 (centered), saturation=100, coefficient=spring.
+                    const bool ok = LogiPlaySpringForce(idx, 0, 100, spring);
+                    log::InfoF("[gwheel] override: centering spring %d%% -> %s",
+                               spring, ok ? "ok" : "FAILED");
+                    st.lastSpringPct.store(spring, std::memory_order_relaxed);
+                }
+            }
+            else if (edgeOff)
+            {
+                LogiStopSpringForce(idx);
+                log::Info("[gwheel] override disabled: centering spring stopped");
+
+                const int  orig = st.originalRangeDeg.load(std::memory_order_acquire);
+                const bool have = st.haveOriginalRange.load(std::memory_order_acquire);
+                if (have && orig > 0)
+                {
+                    const bool ok = LogiSetOperatingRange(idx, orig);
+                    log::InfoF("[gwheel] override disabled: restoring pre-override range=%d deg -> %s",
+                               orig, ok ? "ok" : "FAILED");
+                }
+                else
+                {
+                    log::Info("[gwheel] override disabled: no captured range to restore");
+                }
+                st.lastRangeDeg.store(-1, std::memory_order_relaxed);
+                st.lastSpringPct.store(-1, std::memory_order_relaxed);
+            }
+            // else: override is off and has never been on this session — do
+            // nothing. G HUB remains fully in charge of the wheel.
+
+            st.lastOverrideEnabled.store(enabled, std::memory_order_relaxed);
+        }
     }
 
     bool Init()
@@ -335,9 +449,20 @@ namespace gwheel::wheel
             const int idx = st.index.load(std::memory_order_acquire);
             if (idx >= 0)
             {
+                // Always stop any forces we might have kicked off.
                 LogiStopSpringForce(idx);
                 LogiStopDamperForce(idx);
                 LogiStopConstantForce(idx);
+
+                // Return the wheel to Logitech's out-of-box hardware range
+                // (900 deg) on shutdown. The SDK's Properties API for
+                // restoring G HUB's exact values isn't functional with modern
+                // G HUB - LogiGet/SetPreferredControllerProperties both
+                // return false - so 900 is the pragmatic "vanilla" state.
+                // Runs unconditionally so crashes-to-desktop mid-override
+                // don't leave the wheel stuck at a narrow range.
+                const bool ok = LogiSetOperatingRange(idx, 900);
+                log::InfoF("[gwheel] shutdown: LogiSetOperatingRange(900) -> %s", ok ? "ok" : "FAILED");
             }
             LogiSteeringShutdown();
             log::Info("[gwheel] LogiSteeringShutdown ok");
@@ -382,6 +507,8 @@ namespace gwheel::wheel
                 log::Warn("[gwheel] wheel disconnected; will re-bind when it returns");
             return;
         }
+
+        ApplyOverrides(idx);
 
         const DIJOYSTATE2* raw = LogiGetState(idx);
         if (!raw) return;

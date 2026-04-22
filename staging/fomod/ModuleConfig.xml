@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+
+  <moduleName>Logitech G-series Wheel Mod</moduleName>
+
+  <!-- Full mod requires RED4ext at minimum. ArchiveXL is pulled in transitively
+       by Mod Settings; we flag its absence rather than hard-blocking since users
+       frequently install it after the FOMOD run. -->
+  <moduleDependencies operator="And">
+    <fileDependency file="bin\x64\Cyberpunk2077.exe" state="Active"/>
+  </moduleDependencies>
+
+  <requiredInstallFiles>
+    <file source="build\gwheel.dll"
+          destination="red4ext\plugins\gwheel\gwheel.dll"/>
+    <file source="gwheel_reds\gwheel_natives.reds"
+          destination="r6\scripts\gwheel\gwheel_natives.reds"/>
+    <file source="gwheel_reds\gwheel_settings.reds"
+          destination="r6\scripts\gwheel\gwheel_settings.reds"/>
+  </requiredInstallFiles>
+
+  <installSteps order="Explicit">
+
+    <installStep name="Dependency check">
+      <optionalFileGroups order="Explicit">
+
+        <group name="Required dependencies" type="SelectExactlyOne">
+          <plugins order="Explicit">
+
+            <plugin name="RED4ext is installed — continue">
+              <description>RED4ext was detected in this game install. Installation will proceed.</description>
+              <conditionFlags>
+                <flag name="deps_ok">yes</flag>
+              </conditionFlags>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Optional"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies>
+                        <fileDependency file="red4ext\RED4ext.dll" state="Active"/>
+                      </dependencies>
+                      <type name="Recommended"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+
+            <plugin name="RED4ext is missing — I will install it afterward">
+              <description>RED4ext was not found at red4ext/RED4ext.dll. This mod REQUIRES it. Cancel now and install RED4ext from https://www.nexusmods.com/cyberpunk2077/mods/2380, then re-run this installer. Choose this option only if you plan to install RED4ext yourself before launching the game.</description>
+              <conditionFlags>
+                <flag name="deps_ok">ack</flag>
+              </conditionFlags>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="NotUsable"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies operator="Or">
+                        <fileDependency file="red4ext\RED4ext.dll" state="Missing"/>
+                        <fileDependency file="red4ext\RED4ext.dll" state="Inactive"/>
+                      </dependencies>
+                      <type name="Optional"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+
+          </plugins>
+        </group>
+
+        <group name="Runtime (required)" type="SelectAny">
+          <plugins order="Explicit">
+
+            <plugin name="Logitech G HUB or Gaming Software">
+              <description>This mod reads your wheel via the Logitech Steering Wheel SDK. That SDK needs Logitech G HUB (or the older Logitech Gaming Software) running in the background - it provides the user-mode service the SDK talks to. Install G HUB from https://www.logitech.com/innovation/g-hub.html and make sure your wheel shows up in it before launching Cyberpunk 2077. This is almost certainly already installed if you have a Logitech wheel.</description>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Required"/>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+
+          </plugins>
+        </group>
+
+        <group name="Recommended companions" type="SelectAny">
+          <plugins order="Explicit">
+
+            <plugin name="ArchiveXL (required by Mod Settings)">
+              <description>Mod Settings (the in-game settings page provider this mod uses) depends on ArchiveXL. If ArchiveXL is missing the Settings page will not appear, but the wheel will still work. Install ArchiveXL from https://www.nexusmods.com/cyberpunk2077/mods/4198.</description>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Optional"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies>
+                        <fileDependency file="red4ext\plugins\ArchiveXL\ArchiveXL.dll" state="Active"/>
+                      </dependencies>
+                      <type name="Recommended"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+
+            <plugin name="Mod Settings (in-game settings page)">
+              <description>Adds the "Mod Settings" menu where this mod exposes deadzones, FFB strength, and the Override G HUB section. Without it the wheel works but you cannot adjust settings from within the game (the plugin will use defaults and read config.json on disk instead). Install from https://www.nexusmods.com/cyberpunk2077/mods/4885.</description>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Optional"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies>
+                        <fileDependency file="r6\scripts\mod_settings\ModSettings.reds" state="Active"/>
+                      </dependencies>
+                      <type name="Recommended"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+
+          </plugins>
+        </group>
+
+      </optionalFileGroups>
+    </installStep>
+
+  </installSteps>
+
+</config>

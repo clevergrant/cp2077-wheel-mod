@@ -82,12 +82,11 @@ public class GWheelSettings extends IScriptable {
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.displayName", "Operating range (degrees)")
-  @runtimeProperty("ModSettings.description", "CP2077's steering tops out at about 90 degrees of virtual wheel rotation. Raise this for more physical travel at the cost of lower on-screen responsiveness per degree.")
-  @runtimeProperty("ModSettings.min", "40")
+  @runtimeProperty("ModSettings.min", "200")
   @runtimeProperty("ModSettings.max", "900")
   @runtimeProperty("ModSettings.step", "10")
   @runtimeProperty("ModSettings.dependency", "overrideGHub")
-  let overrideRangeDeg: Int32 = 90;
+  let overrideRangeDeg: Int32 = 900;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.displayName", "Centering spring strength (%)")

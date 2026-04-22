@@ -63,12 +63,16 @@ namespace gwheel::vehicle_hook
 
             const auto snap = wheel::CurrentSnapshot();
             if (!snap.connected) return;
-            if (!config::Current().input.enabled) return;
+            const auto cfg = config::Current();
+            if (!cfg.input.enabled) return;
 
             // Inject the wheel axes into the player vehicle's input
             // struct. The hook only fires for the player's vehicle
             // (verified 2026-04-21 - traffic AI pass through untouched).
-            const float steer    = Clamp(snap.steer,    -1.0f, 1.0f);
+            float steer = snap.steer;
+            if (cfg.override_.enabled && cfg.override_.sensitivity != 1.0f)
+                steer = steer * cfg.override_.sensitivity;
+            steer = Clamp(steer, -1.0f, 1.0f);
             const float throttle = Clamp(snap.throttle,  0.0f, 1.0f);
             const float brake    = Clamp(snap.brake,     0.0f, 1.0f);
 

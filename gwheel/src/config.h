@@ -33,7 +33,10 @@ namespace gwheel::config
     {
         bool  enabled = false;
         float sensitivity = 1.0f;
-        int32_t rangeDeg = 900;
+        // CP2077's steering tops out at ~90 degrees of virtual wheel rotation,
+        // so 90 is a better match than a sim-racing 900. Raise via the slider
+        // if you want more travel.
+        int32_t rangeDeg = 90;
         int32_t centeringSpringPct = 50;
     };
 
