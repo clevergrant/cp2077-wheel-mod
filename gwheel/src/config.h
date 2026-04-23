@@ -40,12 +40,21 @@ namespace gwheel::config
         int32_t responseDelayMs = 20;
     };
 
+    struct Hello
+    {
+        // Play the FFB handshake (4 triplets + centering) on wheel connect.
+        // Installer-level choice; persisted to config.json so it survives
+        // restarts until changed.
+        bool playOnStart = true;
+    };
+
     struct Config
     {
         int32_t     version = 2;
         Input       input;
         Ffb         ffb;
         Override    override_;
+        Hello       hello;
         PerVehicle  car        = { 1.0f, 20 };
         PerVehicle  motorcycle = { 1.2f, 10 };
         PerVehicle  truck      = { 0.8f, 40 };
@@ -87,6 +96,8 @@ namespace gwheel::config
     void SetOverrideSensitivity(float v);
     void SetOverrideRangeDeg(int32_t v);
     void SetOverrideCenteringSpringPct(int32_t v);
+
+    void SetHelloPlayOnStart(bool v);
 
     // Single-input binding: inputId in [0, kBindingCount), action as the
     // Action int from input_bindings.h.

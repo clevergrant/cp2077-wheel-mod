@@ -130,6 +130,44 @@
       </optionalFileGroups>
     </installStep>
 
+    <installStep name="Startup handshake">
+      <optionalFileGroups order="Explicit">
+
+        <group name="Pon pon shi handshake" type="SelectExactlyOne">
+          <plugins order="Explicit">
+
+            <plugin name="Play startup handshake (recommended)">
+              <description>When the wheel connects on game start, play a brief four-triplet FFB pattern and then center the wheel with a spring. Confirms the mod is live and returns the wheel to 0°. Recommended unless you find it annoying.</description>
+              <files>
+                <file source="fomod_configs\config_handshake_on.json"
+                      destination="red4ext\plugins\gwheel\config.json"/>
+              </files>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Recommended"/>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+
+            <plugin name="Skip startup handshake">
+              <description>Connect the wheel silently — no FFB pulses, no centering spring. The mod still reads inputs and drives game FFB as usual.</description>
+              <files>
+                <file source="fomod_configs\config_handshake_off.json"
+                      destination="red4ext\plugins\gwheel\config.json"/>
+              </files>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="Optional"/>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+
+          </plugins>
+        </group>
+
+      </optionalFileGroups>
+    </installStep>
+
   </installSteps>
 
 </config>

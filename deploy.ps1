@@ -73,6 +73,14 @@ foreach ($f in $fomodFiles) {
   if (-not (Test-Path $f)) { Fail "Missing FOMOD file: $f" }
 }
 
+$fomodConfigFiles = @(
+  "fomod_configs\config_handshake_on.json",
+  "fomod_configs\config_handshake_off.json"
+)
+foreach ($f in $fomodConfigFiles) {
+  if (-not (Test-Path $f)) { Fail "Missing FOMOD config fragment: $f" }
+}
+
 # ---------- build (if needed) ----------------------------------------------
 
 $dllPath = Join-Path $BuildDir "gwheel\$Config\gwheel.dll"
@@ -263,13 +271,17 @@ New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
 New-Item -ItemType Directory -Force -Path $distDir    | Out-Null
 
 # Layout for the FOMOD - source paths match what ModuleConfig.xml references.
-New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "build")       | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "fomod")       | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "gwheel_reds") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "build")         | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "fomod")         | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "fomod_configs") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "gwheel_reds")   | Out-Null
 
 Copy-Item -Force $dllPath                          (Join-Path $stagingDir "build\gwheel.dll")
 Copy-Item -Force "fomod\info.xml"                  (Join-Path $stagingDir "fomod\info.xml")
 Copy-Item -Force "fomod\ModuleConfig.xml"          (Join-Path $stagingDir "fomod\ModuleConfig.xml")
+foreach ($c in $fomodConfigFiles) {
+  Copy-Item -Force $c (Join-Path $stagingDir $c)
+}
 foreach ($r in $redsFiles) {
   Copy-Item -Force $r (Join-Path $stagingDir (Split-Path $r -Leaf | ForEach-Object { "gwheel_reds\$_" }))
 }

@@ -209,7 +209,7 @@ namespace gwheel::wheel
                 log::Info("[gwheel] firing hello pulse (2 triplets + center)");
 
                 // Two triplets: R L R, L R L. Final step centers.
-                // 150 BPM: quarter note = 400ms. Rhythm per measure is
+                // 300 BPM: quarter note = 200ms. Rhythm per measure is
                 // quarter quarter quarter rest. Each beat fires a short
                 // kick of force then releases for the remainder of the beat
                 // so the pulse feels like a tap rather than a held push.
@@ -217,17 +217,18 @@ namespace gwheel::wheel
                     { +1, -1, +1 },   // R L R
                     { -1, +1, -1 },   // L R L
                 };
-                constexpr auto kPulseMs   = 80ms;               // active kick
-                constexpr auto kBeatMs    = 400ms;              // quarter @ 150 BPM
+                constexpr auto kPulseMs   = 40ms;               // active kick
+                constexpr auto kBeatMs    = 200ms;              // quarter @ 300 BPM
                 constexpr auto kGapMs     = kBeatMs - kPulseMs; // silence within beat
-                constexpr auto kRestMs    = 400ms;              // quarter rest between triplets
+                constexpr auto kRestMs    = 200ms;              // quarter rest between triplets
                 constexpr int  kMagnitude = 45;                 // percent
+                constexpr int  kNumTriplets = 4;                // R-L-R, L-R-L, R-L-R, L-R-L
 
-                for (int t = 0; t < 2; ++t)
+                for (int t = 0; t < kNumTriplets; ++t)
                 {
                     for (int b = 0; b < 3; ++b)
                     {
-                        LogiPlayConstantForce(idx, kTriplets[t][b] * kMagnitude);
+                        LogiPlayConstantForce(idx, kTriplets[t % 2][b] * kMagnitude);
                         std::this_thread::sleep_for(kPulseMs);
                         LogiStopConstantForce(idx);
                         std::this_thread::sleep_for(kGapMs);
@@ -235,17 +236,13 @@ namespace gwheel::wheel
                     std::this_thread::sleep_for(kRestMs);
                 }
 
-                // Final step: center the wheel with a spring + damper, hold
-                // for 3s, then release all forces so the wheel is free to
-                // move under the user's hand (or under game-driven FFB
-                // later). The damper is what actually kills the momentum of
-                // the wheel snapping back to center - spring alone lets it
-                // oscillate around 0 for a while.
+                // Final step: hold a 100% centering spring for 3s, then
+                // release so game-driven FFB can take over.
                 LogiStopConstantForce(idx);
-                const bool springOk = LogiPlaySpringForce(idx, 0, 100, 80);
-                const bool damperOk = LogiPlayDamperForce(idx, 60);
-                log::InfoF("[gwheel] hello centering begin (spring=%d damper=%d) - holding 3s",
-                           springOk ? 1 : 0, damperOk ? 1 : 0);
+                LogiStopDamperForce(idx);
+                const bool springOk = LogiPlaySpringForce(idx, 0, 100, 100);
+                log::InfoF("[gwheel] hello centering begin (spring=%d) - holding 3s",
+                           springOk ? 1 : 0);
                 std::this_thread::sleep_for(3000ms);
                 log::Info("[gwheel] hello centering end - releasing forces");
                 LogiStopSpringForce(idx);
@@ -339,7 +336,13 @@ namespace gwheel::wheel
             // Pick the per-wheel button/POV layout based on friendly name.
             input_bindings::SetDeviceLayout(snap.productName);
 
-            if (snap.hasFFB) FireHelloPulse(idx);
+            if (snap.hasFFB)
+            {
+                if (config::Current().hello.playOnStart)
+                    FireHelloPulse(idx);
+                else
+                    log::Info("[gwheel] hello pulse disabled by config (hello.playOnStart=false)");
+            }
 
             return true;
         }

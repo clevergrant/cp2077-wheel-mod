@@ -21,12 +21,17 @@ public static native func GWheel_SetOverrideSensitivity(v: Float) -> Bool;
 public static native func GWheel_SetOverrideRangeDeg(deg: Int32) -> Bool;
 public static native func GWheel_SetOverrideCenteringSpringPct(pct: Int32) -> Bool;
 
-// Wheel-button -> in-game action bindings. `action` is a free-form string
-// (e.g. "handbrake", "horn") whose meaning is interpreted by the native
-// action-dispatch detour once gwheel/src/sigs.h is populated.
-public static native func GWheel_SetButtonBinding(button: Int32, action: String) -> Bool;
-public static native func GWheel_ClearButtonBinding(button: Int32) -> Bool;
-public static native func GWheel_GetButtonBinding(button: Int32) -> String;
-public static native func GWheel_IsButtonPressed(button: Int32) -> Bool;
-public static native func GWheel_GetLastPressedButton() -> Int32;
-public static native func GWheel_GetButtonBindingsJson() -> String;
+// Per-physical-input action binding. inputId is one of the stable IDs in
+// gwheel/src/input_bindings.h (0 = PaddleLeft, 1 = PaddleRight, etc.).
+// action is a GWheelAction enum value cast to Int32; the plugin dispatches
+// it as a Windows SendInput event on rising/falling edges.
+public static native func GWheel_SetInputBinding(inputId: Int32, action: Int32) -> Bool;
+
+// Tracks the player's currently-mounted vehicle. The plugin's vehicle-
+// input detour fires for every visible vehicle each tick; without this
+// filter, our steering/throttle/brake writes would propagate to all of
+// them (remote-driving parked cars, etc.). Call SetPlayerVehicle on
+// mount and ClearPlayerVehicle on dismount from VehicleComponent event
+// wrappers.
+public static native func GWheel_SetPlayerVehicle(v: ref<VehicleObject>) -> Bool;
+public static native func GWheel_ClearPlayerVehicle() -> Bool;

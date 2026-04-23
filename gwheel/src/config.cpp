@@ -101,6 +101,10 @@ namespace gwheel::config
             out << "    \"centeringSpringPct\": " << c.override_.centeringSpringPct           << "\n";
             out << "  },\n";
 
+            out << "  \"hello\": {\n";
+            out << "    \"playOnStart\": " << (c.hello.playOnStart ? "true" : "false") << "\n";
+            out << "  },\n";
+
             auto emitVeh = [&](const char* name, const PerVehicle& pv, bool last) {
                 out << "    \"" << name << "\": { "
                     << "\"steeringMultiplier\": " << pv.steeringMultiplier << ", "
@@ -232,6 +236,8 @@ namespace gwheel::config
             ExtractFloat (text, "override", "sensitivity",            c.override_.sensitivity);
             ExtractInt   (text, "override", "rangeDeg",               c.override_.rangeDeg);
             ExtractInt   (text, "override", "centeringSpringPct",     c.override_.centeringSpringPct);
+
+            ExtractBool  (text, "hello",    "playOnStart",            c.hello.playOnStart);
 
             auto vehExtract = [&](const char* section, PerVehicle& pv) {
                 ExtractFloat(text, section, "steeringMultiplier", pv.steeringMultiplier);
@@ -366,6 +372,8 @@ namespace gwheel::config
     void SetOverrideSensitivity(float v)    { Mutate([&](Config& c){ c.override_.sensitivity = std::clamp(v, 0.25f, 2.0f); }); }
     void SetOverrideRangeDeg(int32_t v)     { Mutate([&](Config& c){ c.override_.rangeDeg = std::clamp(v, 40, 900); }); }
     void SetOverrideCenteringSpringPct(int32_t v) { Mutate([&](Config& c){ c.override_.centeringSpringPct = std::clamp(v, 0, 100); }); }
+
+    void SetHelloPlayOnStart(bool v)        { Mutate([&](Config& c){ c.hello.playOnStart = v; }); }
 
     void SetInputBinding(int32_t inputId, int32_t action)
     {
