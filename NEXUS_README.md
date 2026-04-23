@@ -41,11 +41,13 @@ Install these first, in this order:
 Drop the downloaded ZIP on Vortex. The FOMOD prompts you to confirm RED4ext, ArchiveXL, and Mod Settings are present, and installs:
 
 - `<CP2077>/red4ext/plugins/gwheel/gwheel.dll`
-- `<CP2077>/r6/scripts/gwheel/*.reds`
+- Four `.reds` files under `<CP2077>/r6/scripts/gwheel/`: `gwheel_natives.reds`, `gwheel_settings.reds`, `gwheel_mount.reds`, `gwheel_menu.reds`.
 
-## Compatibility note: byte-pattern signatures
+## Compatibility note: RED4ext address database
 
-The plugin reaches into `Cyberpunk2077.exe` through hard-coded byte-pattern signatures (stored in `gwheel/src/sigs.h`). When CDPR ships a game patch, those signatures drift and the vehicle-input detour goes inactive - you'll see `[gwheel:hook] vehicle-input: pattern not configured` or `no match` in the log. The maintainer regenerates the signatures with the `tools/sigfinder/` Python tool and re-publishes. If your game updates and the mod stops steering, check back on Nexus for an update.
+The plugin locates the game's vehicle-input function through an RED4ext hash (`UniversalRelocBase::Resolve`). RED4ext's maintainers ship updated address databases per game patch. If RED4ext itself is behind the current game build, the hash won't resolve and **RED4ext hard-fails the game at launch with its own message box** - this mod is not the culprit, it's the whole RED4ext ecosystem waiting on an update. Check RED4ext's Nexus page first for a refresh, then come back here if it's still broken after that.
+
+There are no byte-pattern signatures to maintain on this side; no `sigs.h`; no per-patch re-release of this mod for hook drift. Button/keyboard dispatch uses `SendInput` (stable across patches).
 
 The `CHANGELOG.md` lists the game version each release was tested against.
 
@@ -59,17 +61,15 @@ The `CHANGELOG.md` lists the game version each release was tested against.
 
 ## Wheel buttons -> in-game actions
 
-The plugin exposes redscript natives that let you bind wheel buttons to in-game actions:
+You get **20 physical wheel controls** (paddles, D-pad, A/B/X/Y, Start/Select, LSB/RSB, +/-, scroll wheel click + CW + CCW, Xbox/Guide) each bindable to one of **39 in-game actions** (horn, headlights, handbrake, autodrive, exit vehicle, camera cycle, zoom, weapon slots, map, journal, inventory, phone, perks, crafting, quick save, radio menu, consumable, iconic cyberware, pause, tag, call vehicle, and menu nav for when the wheel is your menu controller).
 
-```swift
-GWheel_SetButtonBinding(buttonIndex: Int32, action: String)
-GWheel_ClearButtonBinding(buttonIndex: Int32)
-GWheel_GetButtonBinding(buttonIndex: Int32) -> String
-GWheel_IsButtonPressed(buttonIndex: Int32) -> Bool
-GWheel_GetLastPressedButton() -> Int32
-```
+Bindings are configured through **Mod Settings** (Settings -> Mod Settings -> G-series Wheel -> Button Bindings). They persist across runs via Mod Settings and are also backed up to `red4ext/plugins/gwheel/config.json`.
 
-Bindings persist to `red4ext/plugins/gwheel/config.json`. Until the action-dispatch signature in `sigs.h` is populated, bound presses are logged but not yet routed into the game's action system.
+**Menu mode.** When any pause menu is open (pause, map, inventory, journal, perks, crafting, phone), the D-pad and A/B/X/Y are **automatically** overridden to arrow keys / Enter / Escape regardless of what you bound them to, so the wheel navigates menus like a controller. Other controls (paddles, +/-, scroll, LSB/RSB) keep their bindings.
+
+**G HUB interaction.** The plugin installs a low-level keyboard filter: G HUB can keep sending keyboard events for controls you also bound here, and you won't get double-fires. But if you want the wheel-driven bindings to be the source of truth, clearing the equivalent controls in your G HUB Cyberpunk profile keeps things simple.
+
+Under the hood there is one binding native, `GWheel_SetInputBinding(inputId: Int32, action: Int32)`, where inputId is a PhysicalInput enum value (0-19) and action is a GWheelAction enum value (0-38). Mod Settings drives it for you; direct calls are only useful for scripted test harnesses.
 
 ## Uninstall
 

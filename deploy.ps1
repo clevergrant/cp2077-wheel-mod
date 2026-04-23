@@ -199,10 +199,10 @@ if ($Game) {
 
   # Expose the game's live red4ext log dir inside the repo via a directory
   # junction. After one deploy, every subsequent game launch's fresh logs
-  # appear immediately under tools/sigfinder/runs/cp2077-logs/ with no copy
-  # step - dev tooling can grep/tail them directly.
+  # appear immediately under logs/cp2077-logs/ with no copy step - dev
+  # tooling can grep/tail them directly.
   $logDir = Join-Path $Game "red4ext\logs"
-  $repoRunsDir = Join-Path $repoRoot "tools\sigfinder\runs"
+  $repoRunsDir = Join-Path $repoRoot "logs"
   $junction = Join-Path $repoRunsDir "cp2077-logs"
   if (-not (Test-Path $repoRunsDir)) { New-Item -ItemType Directory -Force -Path $repoRunsDir | Out-Null }
   if (Test-Path $logDir) {
@@ -217,7 +217,7 @@ if ($Game) {
           Remove-Item -Force $junction
         }
       } else {
-        Warn "tools\sigfinder\runs\cp2077-logs exists but is not a junction - leaving it alone"
+        Warn "logs\cp2077-logs exists but is not a junction - leaving it alone"
         $reuse = $true
       }
     }
@@ -242,9 +242,9 @@ if ($Game) {
   Write-Host '                 [gwheel] Logitech Steering Wheel SDK v...'
   Write-Host '                 [gwheel] wheel bound at SDK slot 0: "G923 ..."'
   Write-Host '                 [gwheel] firing hello pulse (confirms FFB is live)'
-  Write-Host '                 [gwheel:hook] vehicle-input: pattern not configured - hook inactive. Run tools/sigfinder/sigfinder.py and update gwheel/src/sigs.h.'
-  Write-Host '     The hook-inactive line is EXPECTED until the sigfinder tool has been run against the current game patch.'
-  Write-Host '  3. Check redscript compile log (if the Settings page or vehicle hook breaks):'
+  Write-Host '                 [gwheel:hook] UpdateVehicleCameraInput fired for the first time (live-hook signal once you enter a vehicle)'
+  Write-Host '     If the game fails to launch with an RED4ext MessageBox, the UpdateVehicleCameraInput hash did not resolve - update RED4ext itself (its address database ships per game patch).'
+  Write-Host '  3. Check redscript compile log (if the Settings page or mount/menu wrappers break):'
   Write-Host ("       " + (Join-Path $Game 'r6\cache\modded\final.redscripts.log'))
   Write-Host '  4. In-game: Main Menu -> Settings -> Mod Settings -> G-series Wheel.'
   exit 0

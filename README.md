@@ -58,8 +58,9 @@ Extract the release ZIP into your Cyberpunk 2077 install directory. The expected
 ```text
 <CP2077>/red4ext/plugins/gwheel/gwheel.dll
 <CP2077>/r6/scripts/gwheel/gwheel_natives.reds
-<CP2077>/r6/scripts/gwheel/gwheel_vehicle_override.reds
 <CP2077>/r6/scripts/gwheel/gwheel_settings.reds
+<CP2077>/r6/scripts/gwheel/gwheel_mount.reds
+<CP2077>/r6/scripts/gwheel/gwheel_menu.reds
 ```
 
 ## First run
@@ -72,11 +73,12 @@ Extract the release ZIP into your Cyberpunk 2077 install directory. The expected
 
 ## Configuration
 
-All settings live in the game's Settings menu. Three groups:
+All settings live in the game's Settings menu. Four groups:
 
 - **Wheel — Input.** Master toggle, per-axis deadzones, per-vehicle response curve.
 - **Wheel — FFB.** Enable, strength (scales collision/texture effects), debug logging.
 - **Wheel — Advanced.** **Override G HUB** toggle (default OFF). Only when ON: sensitivity, operating range, centering spring. Leaving this OFF preserves whatever you've tuned in G HUB.
+- **Wheel — Button Bindings.** 20 physical wheel controls (paddles, D-pad, A/B/X/Y, Start/Select, LSB/RSB, +/-, scroll, Xbox button) each bindable to one of 39 in-game actions (horn, headlights, handbrake, camera, weapons, map, pause, etc.). D-pad and A/B/X/Y auto-swap to arrow-keys / Enter / Escape while any pause menu is open so the wheel navigates menus like a controller.
 
 Values are persisted by Mod Settings across game runs. A backup copy is written to `<CP2077>/red4ext/plugins/gwheel/config.json` — safe to copy/edit between installs, but the game-side Settings page is authoritative while the game is running.
 
@@ -86,7 +88,7 @@ Values are persisted by Mod Settings across game runs. A backup copy is written 
 
 **Settings page doesn't appear.** Mod Settings + ArchiveXL need to be installed correctly. The wheel still works without them; you just lose in-game tuning. Edit `config.json` directly as a fallback.
 
-**Wheel detected but nothing happens in the car.** The redscript vehicle-input hook is the fragile part. Check `red4ext/logs/` for compilation errors in `gwheel_vehicle_override.reds`. A game patch that renames `VehicleComponent` or its methods will break the hook until that file is updated.
+**Wheel detected but nothing happens in the car.** Axis injection goes through a C++ detour on `vehicle::BaseObject::UpdateVehicleCameraInput`, resolved via a hash in RED4ext's address database. If RED4ext itself is behind the current game patch, it terminates the game with its own message box at launch — update RED4ext first. If the game launches but the wheel still doesn't steer, check `red4ext/logs/gwheel-*.log` for `[gwheel:hook] UpdateVehicleCameraInput fired for the first time` (live-hook signal) and call `GWheel_GetDeviceInfo` from a debug console to see the fire counter. Missing or stuck at zero means the mount gate isn't tracking your vehicle — check that `gwheel_mount.reds` compiled (see `r6/cache/modded/final.redscripts.log`).
 
 **FFB never fires.** Confirm the wheel has a motor (see the supported-wheels table). Confirm `GWheel_HasFFB()` returns true in the mod's log output. In G HUB, make sure "Allow game to adjust settings" is enabled; without it the game's force commands won't reach the wheel.
 
@@ -105,7 +107,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the internals. PRs welcome, especiall
 
 - Additional Logitech wheel PIDs not in the table
 - Additional per-vehicle response profiles
-- Confirmed RTTI method signatures as game patches ship
+- Verified per-device button layouts for G920 / G29 / G27 (run `tools/input_probe` against your wheel, diff against `input_bindings.cpp`'s `kG923XboxLayout`)
 
 ## License
 
