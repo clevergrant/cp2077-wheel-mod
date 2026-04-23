@@ -22,4 +22,13 @@ namespace gwheel::vehicle_hook
     // Monotonic counter of how many times the detour has fired since
     // attach. Useful for confirming the hook is live in-car.
     uint64_t FireCount();
+
+    // Set the pointer of the player's currently-mounted vehicle. The
+    // detour only writes into `self` when it matches this pointer —
+    // without this filter, UpdateVehicleCameraInput fires for every
+    // visible vehicle each tick and our writes propagate to all of
+    // them. Called from the mount/unmount redscript event wrappers
+    // via the GWheel_Set/ClearPlayerVehicle natives. Passing nullptr
+    // disables all injection (no player-driven vehicle).
+    void SetPlayerVehicle(void* p);
 }

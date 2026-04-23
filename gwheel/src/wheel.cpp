@@ -2,6 +2,7 @@
 #include "logging.h"
 #include "device_table.h"
 #include "config.h"
+#include "input_bindings.h"
 
 #define DIRECTINPUT_VERSION 0x0800
 #include <windows.h>
@@ -264,19 +265,30 @@ namespace gwheel::wheel
             // afterwards (pump thread runs at 250 Hz so ~1250 attempts == 5s).
             const bool verbose = (n == 1) || (n % 1250 == 0);
 
+            // ignoreXInput=true: on the G923 Xbox variant (and any other Logi
+            // wheel that exposes an XInput face), CP2077 registers an XInput
+            // gamepad which siphons the standard-gamepad bits (ABXY / D-pad /
+            // LSB / RSB / paddles as triggers / Start / Back) away from
+            // DInput. The Logi SDK reads from DInput, so with ignoreXInput=
+            // false we only see the non-XInput extras (scroll rotary, +/-,
+            // Xbox button). Passing true forces the SDK to surface the full
+            // DInput button set even when an XInput client is active in-
+            // process. Standalone (input_probe) saw 20/20 buttons because no
+            // XInput client was live; in-game we saw 7/20 because CP2077's
+            // XInput layer was intercepting. Verified by tools/input_probe.
             bool ok = false;
             if (hwnd)
             {
-                ok = LogiSteeringInitializeWithWindow(false, hwnd);
+                ok = LogiSteeringInitializeWithWindow(true, hwnd);
                 if (verbose || ok)
-                    log::InfoF("[gwheel] LogiSteeringInitializeWithWindow(hwnd=0x%p) -> %s",
+                    log::InfoF("[gwheel] LogiSteeringInitializeWithWindow(ignoreXInput=true, hwnd=0x%p) -> %s",
                                static_cast<void*>(hwnd), ok ? "true" : "false");
             }
             else
             {
-                ok = LogiSteeringInitialize(false);
+                ok = LogiSteeringInitialize(true);
                 if (verbose)
-                    log::InfoF("[gwheel] LogiSteeringInitialize(ignoreXInput=false) -> %s (no game window yet)",
+                    log::InfoF("[gwheel] LogiSteeringInitialize(ignoreXInput=true) -> %s (no game window yet)",
                                ok ? "true" : "false");
             }
 
@@ -323,6 +335,9 @@ namespace gwheel::wheel
 
             st.hasFFB.store(snap.hasFFB, std::memory_order_release);
             st.ready.store(true, std::memory_order_release);
+
+            // Pick the per-wheel button/POV layout based on friendly name.
+            input_bindings::SetDeviceLayout(snap.productName);
 
             if (snap.hasFFB) FireHelloPulse(idx);
 

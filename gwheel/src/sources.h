@@ -1,0 +1,57 @@
+#pragma once
+
+#include <cstdint>
+
+// gwheel::sources — the canonical per-tick view of wheel state + active
+// control context. Sits between the hardware readers (Logi SDK today,
+// RawInput tomorrow) and the consumers (vehicle_hook for axis injection,
+// input_bindings for button→action dispatch).
+//
+// The hardware readers *publish* into this namespace and the consumers
+// *read* from it. Nobody outside this namespace should know which reader
+// filled which field; that's the entire point of the seam.
+
+namespace gwheel::sources
+{
+    struct AxisFrame
+    {
+        float steer    = 0.f;  // -1..+1, negative = left
+        float throttle = 0.f;  //  0..1
+        float brake    = 0.f;  //  0..1
+        float clutch   = 0.f;  //  0..1
+    };
+
+    struct DigitalFrame
+    {
+        uint32_t buttons = 0;       // bit per DInput button, low 32
+        uint16_t pov     = 0xFFFF;  // POV[0] raw value, 0xFFFF = center
+    };
+
+    struct Frame
+    {
+        AxisFrame    axes;
+        DigitalFrame digital;
+        bool         connected = false;
+    };
+
+    // Snapshot read. Safe to call from any thread. Returns the most recent
+    // published frame. Today filled from wheel.cpp (Logi SDK) via Publish();
+    // future raw_input.cpp will publish into the same slot.
+    Frame Current();
+
+    // Called once per pump tick by the hardware reader.
+    void Publish(const Frame& f);
+
+    // ---------- control context ---------------------------------------------
+    //
+    // Context is consulted by input_bindings::Dispatch to decide whether
+    // a vehicle-centric action should fire (suppressed on-foot, since the
+    // bound keyboard keys mean different things when V is walking) and by
+    // the edge-detect loop to decide whether to apply the menu-nav
+    // override for D-pad / ABXY.
+
+    // Flipped by the redscript mount/unmount wrappers via
+    // GWheel_Set/ClearPlayerVehicle; nullptr = not in a vehicle.
+    void SetInVehicle(bool v);
+    bool InVehicle();
+}

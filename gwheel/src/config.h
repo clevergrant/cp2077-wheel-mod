@@ -1,18 +1,12 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace gwheel::config
 {
-    struct ButtonBinding
-    {
-        int32_t     button = -1;
-        std::string action;
-    };
-
     struct Input
     {
         bool        enabled = true;
@@ -56,7 +50,13 @@ namespace gwheel::config
         PerVehicle  motorcycle = { 1.2f, 10 };
         PerVehicle  truck      = { 0.8f, 40 };
         PerVehicle  van        = { 0.9f, 30 };
-        std::vector<ButtonBinding> buttons;
+
+        // Per-physical-input action binding. Indexed by input_bindings::
+        // PhysicalInput; value is input_bindings::Action as int32_t. Array
+        // size is hardcoded at 20 to match PhysicalInput::kCount. Keep in
+        // sync if we add wheel controls.
+        static constexpr size_t kBindingCount = 20;
+        std::array<int32_t, kBindingCount> bindings{};
     };
 
     // Read the published snapshot. Non-blocking; safe from any thread.
@@ -88,7 +88,7 @@ namespace gwheel::config
     void SetOverrideRangeDeg(int32_t v);
     void SetOverrideCenteringSpringPct(int32_t v);
 
-    // Button bindings: button index (0..31) -> action name. Empty action clears.
-    void SetButtonBinding(int32_t button, std::string_view action);
-    void ClearButtonBinding(int32_t button);
+    // Single-input binding: inputId in [0, kBindingCount), action as the
+    // Action int from input_bindings.h.
+    void SetInputBinding(int32_t inputId, int32_t action);
 }

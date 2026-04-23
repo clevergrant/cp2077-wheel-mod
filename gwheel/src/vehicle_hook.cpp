@@ -1,13 +1,14 @@
 #include "vehicle_hook.h"
 #include "plugin.h"
 #include "logging.h"
-#include "wheel.h"
+#include "sources.h"
 #include "config.h"
 
 #include <RED4ext/Relocation.hpp>
 #include <RED4ext/Api/v1/Sdk.hpp>
 
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -42,6 +43,14 @@ namespace gwheel::vehicle_hook
         std::atomic<uint64_t> g_injectCount{0};
         std::atomic<bool>     g_attached{false};
 
+        // Cached pointer of the player's currently-mounted vehicle. The
+        // detour fires for many vehicles each tick (parked cars, visible
+        // traffic with active camera updates, etc.); without this filter,
+        // our input injection writes to every one of them and remote-drives
+        // them all. Set by the redscript mount/unmount event wrappers via
+        // GWheel_Set/ClearPlayerVehicle natives. nullptr = no injection.
+        std::atomic<void*>    g_playerVehicle{nullptr};
+
         inline float* FloatFieldAt(void* base, std::ptrdiff_t off)
         {
             return reinterpret_cast<float*>(static_cast<char*>(base) + off);
@@ -61,24 +70,46 @@ namespace gwheel::vehicle_hook
                 log::InfoF("[gwheel:hook] UpdateVehicleCameraInput fired for the first time (self=%p)", self);
             if (!self) return;
 
-            const auto snap = wheel::CurrentSnapshot();
-            if (!snap.connected) return;
+            // Gate: only write into the player's currently-mounted vehicle.
+            // Redscript mount/unmount event wrappers cache the pointer via
+            // GWheel_SetPlayerVehicle. If no vehicle is cached, inject
+            // nothing — the redscript hook is the authoritative source.
+            void* pv = g_playerVehicle.load(std::memory_order_acquire);
+            if (pv == nullptr || self != pv) return;
+
+            const auto frame = sources::Current();
+            if (!frame.connected) return;
             const auto cfg = config::Current();
             if (!cfg.input.enabled) return;
 
-            // Inject the wheel axes into the player vehicle's input
-            // struct. The hook only fires for the player's vehicle
-            // (verified 2026-04-21 - traffic AI pass through untouched).
-            float steer = snap.steer;
+            // Compute the wheel's contribution to each axis.
+            float wheelSteer = frame.axes.steer;
             if (cfg.override_.enabled && cfg.override_.sensitivity != 1.0f)
-                steer = steer * cfg.override_.sensitivity;
-            steer = Clamp(steer, -1.0f, 1.0f);
-            const float throttle = Clamp(snap.throttle,  0.0f, 1.0f);
-            const float brake    = Clamp(snap.brake,     0.0f, 1.0f);
+                wheelSteer = wheelSteer * cfg.override_.sensitivity;
+            wheelSteer = Clamp(wheelSteer, -1.0f, 1.0f);
+            const float wheelThrottle = Clamp(frame.axes.throttle, 0.0f, 1.0f);
+            const float wheelBrake    = Clamp(frame.axes.brake,    0.0f, 1.0f);
 
-            *FloatFieldAt(self, off::kInputSteer)    = steer;
-            *FloatFieldAt(self, off::kInputThrottle) = throttle;
-            *FloatFieldAt(self, off::kInputBrake)    = brake;
+            // Merge with whatever the vanilla input pipeline (keyboard /
+            // gamepad) already wrote into the struct. g_original(self)
+            // above has already processed WASD / analog stick input into
+            // these fields; we take the max-magnitude so wheel and
+            // keyboard coexist — whichever source asks for more steer /
+            // throttle / brake wins, neither clobbers the other.
+            float* pSteer    = FloatFieldAt(self, off::kInputSteer);
+            float* pThrottle = FloatFieldAt(self, off::kInputThrottle);
+            float* pBrake    = FloatFieldAt(self, off::kInputBrake);
+
+            if (std::fabs(wheelSteer) > std::fabs(*pSteer))
+                *pSteer = wheelSteer;
+            if (wheelThrottle > *pThrottle)
+                *pThrottle = wheelThrottle;
+            if (wheelBrake > *pBrake)
+                *pBrake = wheelBrake;
+
+            const float steer    = *pSteer;
+            const float throttle = *pThrottle;
+            const float brake    = *pBrake;
 
             const auto m = g_injectCount.fetch_add(1, std::memory_order_relaxed) + 1;
             if (m == 1)
@@ -143,4 +174,15 @@ namespace gwheel::vehicle_hook
     bool IsInstalled() { return g_attached.load(std::memory_order_acquire); }
 
     uint64_t FireCount() { return g_fireCount.load(std::memory_order_relaxed); }
+
+    void SetPlayerVehicle(void* p)
+    {
+        void* prev = g_playerVehicle.exchange(p, std::memory_order_acq_rel);
+        if (prev != p)
+            log::InfoF("[gwheel:hook] player vehicle changed: %p -> %p", prev, p);
+        // In-vehicle context flag tracks presence/absence of a mounted
+        // vehicle pointer. input_bindings uses it to suppress vehicle-
+        // centric dispatches on-foot.
+        sources::SetInVehicle(p != nullptr);
+    }
 }

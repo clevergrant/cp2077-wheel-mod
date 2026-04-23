@@ -58,7 +58,8 @@ Info "Version: $version"
 
 $redsFiles = @(
   "gwheel_reds\gwheel_natives.reds",
-  "gwheel_reds\gwheel_settings.reds"
+  "gwheel_reds\gwheel_settings.reds",
+  "gwheel_reds\gwheel_mount.reds"
 )
 foreach ($r in $redsFiles) {
   if (-not (Test-Path $r)) { Fail "Missing redscript source: $r" }

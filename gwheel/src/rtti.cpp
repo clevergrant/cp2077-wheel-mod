@@ -1,7 +1,7 @@
 #include "rtti.h"
 #include "config.h"
 #include "wheel.h"
-#include "button_map.h"
+#include "input_bindings.h"
 #include "vehicle_hook.h"
 #include "plugin.h"
 #include "logging.h"
@@ -104,55 +104,49 @@ namespace gwheel::rtti
             if (aOut) *aOut = true;
         }
 
-        // -------- Button bindings -------------------------------------------
+        // -------- Input bindings --------------------------------------------
 
-        void SetButtonBinding(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        void SetInputBinding(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
         {
-            int32_t button = -1;
-            RED4ext::CString action;
-            RED4ext::GetParameter(aFrame, &button);
+            int32_t inputId = -1;
+            int32_t action = 0;
+            RED4ext::GetParameter(aFrame, &inputId);
             RED4ext::GetParameter(aFrame, &action);
             aFrame->code++;
-            config::SetButtonBinding(button, std::string_view(action.c_str()));
+            config::SetInputBinding(inputId, action);
             if (aOut) *aOut = true;
         }
 
-        void ClearButtonBinding(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        // -------- Player-vehicle mount tracking -----------------------------
+        //
+        // Called from redscript VehicleComponent mount/unmount wrappers so
+        // the hook knows which vehicle is "the one the player is driving"
+        // and doesn't write inputs into all the other vehicles the
+        // UpdateVehicleCameraInput detour fires on each tick.
+
+        void SetPlayerVehicle(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
         {
-            int32_t button = -1;
-            RED4ext::GetParameter(aFrame, &button);
+            RED4ext::Handle<RED4ext::ISerializable> handle;
+            RED4ext::GetParameter(aFrame, &handle);
             aFrame->code++;
-            config::ClearButtonBinding(button);
+            void* ptr = static_cast<void*>(handle.instance);
+            vehicle_hook::SetPlayerVehicle(ptr);
             if (aOut) *aOut = true;
         }
 
-        void GetButtonBinding(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED4ext::CString* aOut, int64_t)
+        void ClearPlayerVehicle(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
         {
-            int32_t button = -1;
-            RED4ext::GetParameter(aFrame, &button);
             aFrame->code++;
-            if (aOut) *aOut = RED4ext::CString(button_map::Get(button).c_str());
+            vehicle_hook::SetPlayerVehicle(nullptr);
+            if (aOut) *aOut = true;
         }
 
-        void IsButtonPressed(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
-        {
-            int32_t button = -1;
-            RED4ext::GetParameter(aFrame, &button);
-            aFrame->code++;
-            if (aOut) *aOut = button_map::IsPressed(button);
-        }
+        // -------- Menu-state tracking ---------------------------------------
+        //
+        // Tells the plugin whether any gameplay-blocking menu is showing,
+        // so it can override D-pad + ABXY with gamepad-nav actions. Driven
+        // by a redscript IsPausedState polling loop (gwheel_menu.reds).
 
-        void GetLastPressedButton(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, int32_t* aOut, int64_t)
-        {
-            aFrame->code++;
-            if (aOut) *aOut = button_map::LastPressed();
-        }
-
-        void GetButtonBindingsJson(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED4ext::CString* aOut, int64_t)
-        {
-            aFrame->code++;
-            if (aOut) *aOut = RED4ext::CString(button_map::SerializeJson().c_str());
-        }
 
         // -------- Registration ----------------------------------------------
 
@@ -229,24 +223,17 @@ namespace gwheel::rtti
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetOverrideCenteringSpringPct>),
                            "Bool", {{ "Int32", "pct" }});
 
-            RegisterGlobal(rtti, "GWheel_SetButtonBinding",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetButtonBinding),
-                           "Bool", {{ "Int32", "button" }, { "String", "action" }});
-            RegisterGlobal(rtti, "GWheel_ClearButtonBinding",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&ClearButtonBinding),
-                           "Bool", {{ "Int32", "button" }});
-            RegisterGlobal(rtti, "GWheel_GetButtonBinding",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&GetButtonBinding),
-                           "String", {{ "Int32", "button" }});
-            RegisterGlobal(rtti, "GWheel_IsButtonPressed",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&IsButtonPressed),
-                           "Bool", {{ "Int32", "button" }});
-            RegisterGlobal(rtti, "GWheel_GetLastPressedButton",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&GetLastPressedButton),
-                           "Int32", {});
-            RegisterGlobal(rtti, "GWheel_GetButtonBindingsJson",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&GetButtonBindingsJson),
-                           "String", {});
+            RegisterGlobal(rtti, "GWheel_SetInputBinding",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInputBinding),
+                           "Bool", {{ "Int32", "inputId" }, { "Int32", "action" }});
+
+            RegisterGlobal(rtti, "GWheel_SetPlayerVehicle",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetPlayerVehicle),
+                           "Bool", {{ "handle:vehicleBaseObject", "v" }});
+            RegisterGlobal(rtti, "GWheel_ClearPlayerVehicle",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&ClearPlayerVehicle),
+                           "Bool", {});
+
 
             log::Info("[gwheel] native functions registered for redscript");
 

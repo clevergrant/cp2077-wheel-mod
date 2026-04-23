@@ -1,8 +1,10 @@
 #include "plugin.h"
 #include "logging.h"
 #include "wheel.h"
-#include "button_map.h"
+#include "sources.h"
+#include "input_bindings.h"
 #include "vehicle_hook.h"
+#include "kbd_hook.h"
 #include "config.h"
 #include "rtti.h"
 #include "rtti_dump.h"
@@ -18,6 +20,23 @@ namespace gwheel
         std::atomic<bool> g_pumpRunning{false};
         std::thread       g_pumpThread;
 
+        // Convert the Logi SDK's wheel::Snapshot into the canonical
+        // sources::Frame that the rest of the plugin consumes. Today this
+        // is a straight field copy; if we move buttons+POV to RawInput
+        // later, this becomes the merge point between the two readers.
+        sources::Frame BuildFrame(const wheel::Snapshot& s)
+        {
+            sources::Frame f;
+            f.connected       = s.connected;
+            f.axes.steer      = s.steer;
+            f.axes.throttle   = s.throttle;
+            f.axes.brake      = s.brake;
+            f.axes.clutch     = s.clutch;
+            f.digital.buttons = s.buttons;
+            f.digital.pov     = s.pov;
+            return f;
+        }
+
         void PumpLoop()
         {
             using namespace std::chrono_literals;
@@ -25,9 +44,10 @@ namespace gwheel
             while (g_pumpRunning.load(std::memory_order_acquire))
             {
                 wheel::Pump();
-                const auto snap = wheel::CurrentSnapshot();
-                if (snap.connected)
-                    button_map::OnWheelTick(snap.buttons);
+                const sources::Frame frame = BuildFrame(wheel::CurrentSnapshot());
+                sources::Publish(frame);
+                if (frame.connected)
+                    input_bindings::OnTick(frame);
                 std::this_thread::sleep_for(4ms);
             }
             log::Info("[gwheel] pump thread stopped");
@@ -59,15 +79,19 @@ namespace gwheel
         log::Info("[gwheel] step 3/5: initializing Logitech SDK wheel layer (deferred)");
         wheel::Init();
 
-        log::Info("[gwheel] step 4/5: installing vehicle-input detour (hash-resolved)");
+        log::Info("[gwheel] step 4/6: installing vehicle-input detour (hash-resolved)");
         vehicle_hook::Init();
 
-        log::Info("[gwheel] step 5/5: starting 250 Hz pump thread");
+        log::Info("[gwheel] step 5/6: installing on-foot keyboard hook (G HUB injection filter)");
+        kbd_hook::Install();
+
+        log::Info("[gwheel] step 6/6: starting 250 Hz pump thread");
         g_pumpRunning.store(true, std::memory_order_release);
         g_pumpThread = std::thread(PumpLoop);
 
-        log::InfoF("[gwheel] ready: hook=%s",
-                   vehicle_hook::IsInstalled() ? "installed" : "not-installed");
+        log::InfoF("[gwheel] ready: hook=%s kbdhook=%s",
+                   vehicle_hook::IsInstalled() ? "installed" : "not-installed",
+                   kbd_hook::IsInstalled() ? "installed" : "not-installed");
     }
 
     void OnUnload()
@@ -77,6 +101,7 @@ namespace gwheel
         g_pumpRunning.store(false, std::memory_order_release);
         if (g_pumpThread.joinable()) g_pumpThread.join();
 
+        kbd_hook::Uninstall();
         vehicle_hook::Shutdown();
         wheel::Shutdown();
 

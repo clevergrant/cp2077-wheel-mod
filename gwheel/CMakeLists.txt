@@ -3,8 +3,10 @@ set(GWHEEL_SOURCES
   src/plugin.cpp
   src/device_table.cpp
   src/wheel.cpp
+  src/sources.cpp
   src/vehicle_hook.cpp
-  src/button_map.cpp
+  src/input_bindings.cpp
+  src/kbd_hook.cpp
   src/config.cpp
   src/rtti.cpp
   src/rtti_dump.cpp
@@ -16,8 +18,10 @@ set(GWHEEL_HEADERS
   src/logging.h
   src/device_table.h
   src/wheel.h
+  src/sources.h
   src/vehicle_hook.h
-  src/button_map.h
+  src/input_bindings.h
+  src/kbd_hook.h
   src/config.h
   src/rtti.h
   src/rtti_dump.h
