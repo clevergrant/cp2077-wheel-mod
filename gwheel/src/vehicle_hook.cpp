@@ -101,7 +101,10 @@ namespace gwheel::vehicle_hook
         // struct.
         std::atomic<uint32_t> g_psWheelDataOffset{0};
         std::atomic<bool>     g_surfaceLookupFailed{false};
-        constexpr std::ptrdiff_t kPS_wheelEntryStride = 0x18;
+        std::atomic<bool>     g_persistentStateProbeDone{false};
+        constexpr std::ptrdiff_t kPS_wheelEntryStride       = 0x18;
+        // vehicleBaseObject.persistentState offset (from RTTI dump).
+        constexpr std::ptrdiff_t kVehicleBaseObject_persistentState = 0x168;
 
         // Last vehicle pointer for which we've dumped per-car physics values
         // to the log. Cleared in SetPlayerVehicle when a new vehicle mounts,
@@ -331,13 +334,12 @@ namespace gwheel::vehicle_hook
 
             if (cfg.input.enabled)
             {
-                // Compute the wheel's contribution to each axis.
-                float wheelSteer = frame.axes.steer;
-                if (cfg.wheel.steeringSensitivity != 1.0f)
-                    wheelSteer = wheelSteer * cfg.wheel.steeringSensitivity;
-                wheelSteer = Clamp(wheelSteer, -1.0f, 1.0f);
-                const float wheelThrottle = Clamp(frame.axes.throttle, 0.0f, 1.0f);
-                const float wheelBrake    = Clamp(frame.axes.brake,    0.0f, 1.0f);
+                // Compute the wheel's contribution to each axis. G HUB owns
+                // the per-profile operating range, so wheel position passes
+                // through unmodified.
+                const float wheelSteer    = Clamp(frame.axes.steer,    -1.0f, 1.0f);
+                const float wheelThrottle = Clamp(frame.axes.throttle,  0.0f, 1.0f);
+                const float wheelBrake    = Clamp(frame.axes.brake,     0.0f, 1.0f);
 
                 // Merge with whatever the vanilla input pipeline (keyboard /
                 // gamepad) already wrote into the struct. g_original(self)
@@ -529,13 +531,10 @@ namespace gwheel::vehicle_hook
                 // wide operating range (e.g. 30° rotation out of 900°
                 // reports ~0.07, which × activeTorque rides below the
                 // wheel motor's friction threshold and produces no felt
-                // push-back). wheelSteer is always normalised -1..+1
+                // push-back). frame.axes.steer is always normalised -1..+1
                 // against the *current* operating range, so a moderate
                 // hand position always reads as a moderate value.
-                float torqueSteer = frame.axes.steer;
-                if (cfg.wheel.steeringSensitivity != 1.0f)
-                    torqueSteer *= cfg.wheel.steeringSensitivity;
-                torqueSteer = Clamp(torqueSteer, -1.0f, 1.0f);
+                const float torqueSteer = Clamp(frame.axes.steer, -1.0f, 1.0f);
 
                 wheel::UpdateCenteringSpring(
                     speed,

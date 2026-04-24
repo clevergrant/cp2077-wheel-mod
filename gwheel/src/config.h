@@ -10,9 +10,7 @@ namespace gwheel::config
     struct Input
     {
         bool        enabled = true;
-        int32_t     steerDeadzonePct = 2;
-        int32_t     throttleDeadzonePct = 2;
-        int32_t     brakeDeadzonePct = 2;
+        bool        clutchAsBrake = false;
         std::string responseCurve = "default"; // default | subdued | sharp
     };
 
@@ -45,15 +43,6 @@ namespace gwheel::config
         int32_t activeTorqueStrengthPct = 100;
     };
 
-    struct Wheel
-    {
-        // Linear multiplier on raw wheel position before it hits the game's
-        // steer input. 1.0 = identity. Operating range is owned by G HUB
-        // per-profile; the mod reads it at runtime and auto-scales FFB to
-        // match, so there's no mod-side range knob.
-        float steeringSensitivity = 1.0f;
-    };
-
     struct PerVehicle
     {
         float steeringMultiplier = 1.0f;
@@ -70,10 +59,9 @@ namespace gwheel::config
 
     struct Config
     {
-        int32_t     version = 2;
+        int32_t     version = 3;
         Input       input;
         Ffb         ffb;
-        Wheel       wheel;
         Hello       hello;
         PerVehicle  car        = { 1.0f, 20 };
         PerVehicle  motorcycle = { 1.2f, 10 };
@@ -103,9 +91,7 @@ namespace gwheel::config
     // Per-field setters. Each one swaps the snapshot atomically and writes
     // the updated config back to disk.
     void SetInputEnabled(bool v);
-    void SetSteerDeadzonePct(int32_t v);
-    void SetThrottleDeadzonePct(int32_t v);
-    void SetBrakeDeadzonePct(int32_t v);
+    void SetClutchAsBrake(bool v);
     void SetResponseCurve(std::string_view v);
 
     void SetFfbEnabled(bool v);
@@ -115,8 +101,6 @@ namespace gwheel::config
     void SetStationaryThresholdMps(float v);
     void SetYawFeedbackPct(int32_t v);
     void SetActiveTorqueStrengthPct(int32_t v);
-
-    void SetSteeringSensitivity(float v);
 
     void SetHelloPlayOnStart(bool v);
 

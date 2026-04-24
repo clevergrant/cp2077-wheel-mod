@@ -234,15 +234,9 @@ namespace gwheel::rtti
             RegisterGlobal(rtti, "GWheel_SetInputEnabled",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInputEnabled),
                            "Bool", {{ "Bool", "v" }});
-            RegisterGlobal(rtti, "GWheel_SetSteerDeadzonePct",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetSteerDeadzonePct>),
-                           "Bool", {{ "Int32", "pct" }});
-            RegisterGlobal(rtti, "GWheel_SetThrottleDeadzonePct",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetThrottleDeadzonePct>),
-                           "Bool", {{ "Int32", "pct" }});
-            RegisterGlobal(rtti, "GWheel_SetBrakeDeadzonePct",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetBrakeDeadzonePct>),
-                           "Bool", {{ "Int32", "pct" }});
+            RegisterGlobal(rtti, "GWheel_SetClutchAsBrake",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetClutchAsBrake>),
+                           "Bool", {{ "Bool", "v" }});
 
             RegisterGlobal(rtti, "GWheel_SetFfbEnabled",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetFfbEnabled>),
@@ -263,10 +257,6 @@ namespace gwheel::rtti
             RegisterGlobal(rtti, "GWheel_SetActiveTorqueStrengthPct",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetActiveTorqueStrengthPct>),
                            "Bool", {{ "Int32", "pct" }});
-
-            RegisterGlobal(rtti, "GWheel_SetSteeringSensitivity",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetFloat<&config::SetSteeringSensitivity>),
-                           "Bool", {{ "Float", "v" }});
 
             RegisterGlobal(rtti, "GWheel_SetInputBinding",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInputBinding),

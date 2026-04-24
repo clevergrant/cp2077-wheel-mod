@@ -161,9 +161,7 @@ Each setter atomically swaps the live snapshot and writes `config.json` to disk.
 | Native | Params |
 | --- | --- |
 | `GWheel_SetInputEnabled` | `v: Bool` |
-| `GWheel_SetSteerDeadzonePct` | `pct: Int32` (0–20) |
-| `GWheel_SetThrottleDeadzonePct` | `pct: Int32` (0–20) |
-| `GWheel_SetBrakeDeadzonePct` | `pct: Int32` (0–20) |
+| `GWheel_SetClutchAsBrake` | `v: Bool` |
 | `GWheel_SetFfbEnabled` | `v: Bool` |
 | `GWheel_SetFfbStrengthPct` | `pct: Int32` (0–100) |
 | `GWheel_SetFfbDebugLogging` | `v: Bool` |
@@ -195,13 +193,11 @@ Path: `<CP2077>/red4ext/plugins/gwheel/config.json`. Loaded at plugin load, writ
 
 ```json
 {
-  "version": 2,
+  "version": 3,
 
   "input": {
     "enabled": true,
-    "steerDeadzonePct": 2,
-    "throttleDeadzonePct": 2,
-    "brakeDeadzonePct": 2,
+    "clutchAsBrake": false,
     "responseCurve": "default"
   },
 
@@ -234,9 +230,7 @@ Path: `<CP2077>/red4ext/plugins/gwheel/config.json`. Loaded at plugin load, writ
 | Field | Default | Range | Notes |
 | --- | --- | --- | --- |
 | `input.enabled` | `true` | — | Master toggle for wheel input. |
-| `input.steerDeadzonePct` | `2` | 0 – 20 | Applied after G HUB's curve. |
-| `input.throttleDeadzonePct` | `2` | 0 – 20 | |
-| `input.brakeDeadzonePct` | `2` | 0 – 20 | |
+| `input.clutchAsBrake` | `false` | — | When true, `BuildFrame` publishes `brake = max(brake, clutch)` so the clutch pedal brakes alongside the brake pedal. |
 | `input.responseCurve` | `"default"` | `"default"` \| `"subdued"` \| `"sharp"` | Shapes axis response pre-game. |
 | `ffb.enabled` | `true` | — | Plugin-generated effects (collision / texture) only. |
 | `ffb.strengthPct` | `80` | 0 – 100 | Scales plugin effect magnitudes; does not affect G HUB spring. |
@@ -290,7 +284,6 @@ Every effect magnitude is scaled by `ffb.strengthPct / 100` via `wheel::SetGloba
 | Centering spring | G HUB | Mod (plugin-created spring effect) |
 | Collision FFB | Mod | Mod |
 | Surface-texture FFB | Mod | Mod |
-| In-game deadzones | Mod | Mod |
 | Per-vehicle response | Mod | Mod |
 | Wheel button → keyboard (for bound controls) | Mod (via `input_bindings` + `kbd_hook`) | Mod |
 

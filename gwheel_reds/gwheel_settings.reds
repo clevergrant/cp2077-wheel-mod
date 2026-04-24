@@ -20,29 +20,10 @@ public class GWheelSettings extends IScriptable {
   let inputEnabled: Bool = true;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.displayName", "Steering deadzone (%)")
-  @runtimeProperty("ModSettings.description", "Small centre deadzone applied after G HUB's own curve.")
-  @runtimeProperty("ModSettings.min", "0")
-  @runtimeProperty("ModSettings.max", "20")
-  @runtimeProperty("ModSettings.step", "1")
+  @runtimeProperty("ModSettings.displayName", "Treat clutch as brake")
+  @runtimeProperty("ModSettings.description", "Treat the clutch pedal as a second brake. The clutch's softer spring makes it easier to modulate than the stiff brake pedal. Both pedals brake when enabled; whichever is pressed deeper wins.")
   @runtimeProperty("ModSettings.dependency", "inputEnabled")
-  let steerDeadzonePct: Int32 = 2;
-
-  @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.displayName", "Throttle deadzone (%)")
-  @runtimeProperty("ModSettings.min", "0")
-  @runtimeProperty("ModSettings.max", "20")
-  @runtimeProperty("ModSettings.step", "1")
-  @runtimeProperty("ModSettings.dependency", "inputEnabled")
-  let throttleDeadzonePct: Int32 = 2;
-
-  @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.displayName", "Brake deadzone (%)")
-  @runtimeProperty("ModSettings.min", "0")
-  @runtimeProperty("ModSettings.max", "20")
-  @runtimeProperty("ModSettings.step", "1")
-  @runtimeProperty("ModSettings.dependency", "inputEnabled")
-  let brakeDeadzonePct: Int32 = 2;
+  let clutchAsBrake: Bool = false;
 
   // ---- Force feedback -----------------------------------------------------
 
@@ -94,18 +75,11 @@ public class GWheelSettings extends IScriptable {
 
   // ---- Wheel hardware ---------------------------------------------------
   //
-  // Operating range is owned by Logitech G HUB (per-profile). The mod
-  // reads G HUB's current value and auto-scales FFB to match, so a 900-
-  // degree rotation isn't weighed down by SAT meant for a 180. Change
-  // the operating range in G HUB's Cyberpunk 2077 profile.
-
-  @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.displayName", "Steering sensitivity")
-  @runtimeProperty("ModSettings.description", "Linear multiplier on raw wheel position before it hits the game's input. 1.0 = full physical range maps to full lock. Lower = part of your physical rotation is dead; higher = hit full lock before physically reaching it.")
-  @runtimeProperty("ModSettings.min", "0.25")
-  @runtimeProperty("ModSettings.max", "2.0")
-  @runtimeProperty("ModSettings.step", "0.05")
-  let steeringSensitivity: Float = 1.0;
+  // Operating range and sensitivity are owned by Logitech G HUB (per-
+  // profile). The mod reads G HUB's current value and auto-scales FFB to
+  // match, so a 900-degree rotation isn't weighed down by SAT meant for a
+  // 180. Change the operating range / sensitivity in G HUB's Cyberpunk
+  // 2077 profile.
 
   // ---- Button bindings (all user-assignable) -----------------------------
   //
@@ -230,9 +204,7 @@ public class GWheelSettings extends IScriptable {
 
   public func Push() -> Void {
     GWheel_SetInputEnabled(this.inputEnabled);
-    GWheel_SetSteerDeadzonePct(this.steerDeadzonePct);
-    GWheel_SetThrottleDeadzonePct(this.throttleDeadzonePct);
-    GWheel_SetBrakeDeadzonePct(this.brakeDeadzonePct);
+    GWheel_SetClutchAsBrake(this.clutchAsBrake);
 
     GWheel_SetFfbEnabled(this.ffbEnabled);
     GWheel_SetFfbDebugLogging(this.ffbDebugLogging);
@@ -241,8 +213,6 @@ public class GWheelSettings extends IScriptable {
     GWheel_SetStationaryThresholdMps(this.stationaryThresholdMps);
     GWheel_SetYawFeedbackPct(this.yawFeedbackPct);
     GWheel_SetActiveTorqueStrengthPct(this.activeTorqueStrengthPct);
-
-    GWheel_SetSteeringSensitivity(this.steeringSensitivity);
 
     // Input IDs match the PhysicalInput enum in
     // gwheel/src/input_bindings.h. D-pad + A/B/X/Y (ids 2-9) are

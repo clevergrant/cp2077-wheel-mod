@@ -78,10 +78,8 @@ namespace gwheel::config
             out << "  \"version\": " << c.version << ",\n";
 
             out << "  \"input\": {\n";
-            out << "    \"enabled\": " << (c.input.enabled ? "true" : "false") << ",\n";
-            out << "    \"steerDeadzonePct\": "    << c.input.steerDeadzonePct    << ",\n";
-            out << "    \"throttleDeadzonePct\": " << c.input.throttleDeadzonePct << ",\n";
-            out << "    \"brakeDeadzonePct\": "    << c.input.brakeDeadzonePct    << ",\n";
+            out << "    \"enabled\": "       << (c.input.enabled ? "true" : "false")       << ",\n";
+            out << "    \"clutchAsBrake\": " << (c.input.clutchAsBrake ? "true" : "false") << ",\n";
             {
                 std::string esc;
                 EscapeJsonTo(esc, c.input.responseCurve);
@@ -96,10 +94,6 @@ namespace gwheel::config
             out << "    \"stationaryThresholdMps\": "  << c.ffb.stationaryThresholdMps                 << ",\n";
             out << "    \"yawFeedbackPct\": "          << c.ffb.yawFeedbackPct                         << ",\n";
             out << "    \"activeTorqueStrengthPct\": " << c.ffb.activeTorqueStrengthPct                << "\n";
-            out << "  },\n";
-
-            out << "  \"wheel\": {\n";
-            out << "    \"steeringSensitivity\": " << c.wheel.steeringSensitivity << "\n";
             out << "  },\n";
 
             out << "  \"hello\": {\n";
@@ -224,9 +218,7 @@ namespace gwheel::config
             ExtractInt   (text, {},         "version",                c.version);
 
             ExtractBool  (text, "input",    "enabled",                c.input.enabled);
-            ExtractInt   (text, "input",    "steerDeadzonePct",       c.input.steerDeadzonePct);
-            ExtractInt   (text, "input",    "throttleDeadzonePct",    c.input.throttleDeadzonePct);
-            ExtractInt   (text, "input",    "brakeDeadzonePct",       c.input.brakeDeadzonePct);
+            ExtractBool  (text, "input",    "clutchAsBrake",          c.input.clutchAsBrake);
             ExtractString(text, "input",    "responseCurve",          c.input.responseCurve);
 
             ExtractBool  (text, "ffb",      "enabled",                c.ffb.enabled);
@@ -235,8 +227,6 @@ namespace gwheel::config
             ExtractFloat (text, "ffb",      "stationaryThresholdMps", c.ffb.stationaryThresholdMps);
             ExtractInt   (text, "ffb",      "yawFeedbackPct",         c.ffb.yawFeedbackPct);
             ExtractInt   (text, "ffb",      "activeTorqueStrengthPct", c.ffb.activeTorqueStrengthPct);
-
-            ExtractFloat (text, "wheel",    "steeringSensitivity",    c.wheel.steeringSensitivity);
 
             ExtractBool  (text, "hello",    "playOnStart",            c.hello.playOnStart);
 
@@ -355,9 +345,7 @@ namespace gwheel::config
     }
 
     void SetInputEnabled(bool v)            { Mutate([&](Config& c){ c.input.enabled = v; }); }
-    void SetSteerDeadzonePct(int32_t v)     { Mutate([&](Config& c){ c.input.steerDeadzonePct    = std::clamp(v, 0, 20); }); }
-    void SetThrottleDeadzonePct(int32_t v)  { Mutate([&](Config& c){ c.input.throttleDeadzonePct = std::clamp(v, 0, 20); }); }
-    void SetBrakeDeadzonePct(int32_t v)     { Mutate([&](Config& c){ c.input.brakeDeadzonePct    = std::clamp(v, 0, 20); }); }
+    void SetClutchAsBrake(bool v)           { Mutate([&](Config& c){ c.input.clutchAsBrake = v; }); }
 
     void SetResponseCurve(std::string_view v)
     {
@@ -373,8 +361,6 @@ namespace gwheel::config
     void SetStationaryThresholdMps(float v) { Mutate([&](Config& c){ c.ffb.stationaryThresholdMps = std::clamp(v, 0.f, 10.f); }); }
     void SetYawFeedbackPct(int32_t v)       { Mutate([&](Config& c){ c.ffb.yawFeedbackPct = std::clamp(v, 0, 100); }); }
     void SetActiveTorqueStrengthPct(int32_t v) { Mutate([&](Config& c){ c.ffb.activeTorqueStrengthPct = std::clamp(v, 0, 100); }); }
-
-    void SetSteeringSensitivity(float v)    { Mutate([&](Config& c){ c.wheel.steeringSensitivity = std::clamp(v, 0.25f, 2.0f); }); }
 
     void SetHelloPlayOnStart(bool v)        { Mutate([&](Config& c){ c.hello.playOnStart = v; }); }
 

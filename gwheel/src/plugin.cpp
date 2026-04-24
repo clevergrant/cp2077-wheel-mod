@@ -9,6 +9,7 @@
 #include "rtti.h"
 #include "rtti_dump.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -34,6 +35,14 @@ namespace gwheel
             f.axes.clutch     = s.clutch;
             f.digital.buttons = s.buttons;
             f.digital.pov     = s.pov;
+
+            // Clutch-as-brake: the G923's brake pedal is physically stiff; the
+            // softer clutch pedal is easier to modulate. CP2077 has no manual
+            // transmission so the clutch axis is otherwise ignored. When the
+            // toggle is on, whichever pedal is pressed deeper drives braking.
+            if (config::Current().input.clutchAsBrake)
+                f.axes.brake = std::max(f.axes.brake, f.axes.clutch);
+
             return f;
         }
 
