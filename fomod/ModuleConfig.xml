@@ -18,6 +18,10 @@
           destination="r6\scripts\gwheel\gwheel_natives.reds"/>
     <file source="gwheel_reds\gwheel_settings.reds"
           destination="r6\scripts\gwheel\gwheel_settings.reds"/>
+    <file source="gwheel_reds\gwheel_mount.reds"
+          destination="r6\scripts\gwheel\gwheel_mount.reds"/>
+    <file source="gwheel_reds\gwheel_events.reds"
+          destination="r6\scripts\gwheel\gwheel_events.reds"/>
   </requiredInstallFiles>
 
   <installSteps order="Explicit">

@@ -392,6 +392,18 @@ namespace gwheel::wheel
         inline std::atomic<bool> s_airborneOn{false};
         inline std::atomic<uint64_t> s_lastCallTickMs{0};
 
+        // Low-pass-filtered road-surface magnitude (0..1). Risess fast on
+        // suspension-activity spikes, decays slowly so a single pothole
+        // leaves a brief trail. Reset when the game pauses.
+        inline std::atomic<float> s_surfaceEnvelope{0.f};
+
+        // Directional jolt state. TriggerJolt sets these three; the spring
+        // update overlays a linearly-decaying force on the active torque
+        // until the duration elapses. s_joltDurationMs==0 means no jolt.
+        inline std::atomic<float>    s_joltForce{0.f};
+        inline std::atomic<uint64_t> s_joltStartMs{0};
+        inline std::atomic<uint32_t> s_joltDurationMs{0};
+
         inline void Reset()
         {
             s_lastCoefPct.store(-1, std::memory_order_release);
@@ -399,6 +411,8 @@ namespace gwheel::wheel
             s_lastDamperPct.store(-1, std::memory_order_release);
             s_lastBumpyPct.store(-1, std::memory_order_release);
             s_airborneOn.store(false, std::memory_order_release);
+            s_surfaceEnvelope.store(0.f, std::memory_order_release);
+            s_joltDurationMs.store(0, std::memory_order_release);
         }
     }
 
@@ -665,8 +679,30 @@ namespace gwheel::wheel
         LogiStopCarAirborne(idx);
     }
 
+    void TriggerJolt(float lateralKick, int durationMs)
+    {
+        using namespace centering_state;
+        if (durationMs <= 0) return;
+        const float k = std::clamp(lateralKick, -1.f, 1.f);
+        // Tiny kicks don't register through the wheel motor's static
+        // friction threshold — ignore them rather than burn a jolt slot.
+        if (std::fabs(k) < 0.05f)
+        {
+            if (log::DebugEnabled())
+                log::DebugF("[gwheel:ffb] jolt REJECTED (tiny): kick=%+.3f dur=%dms", k, durationMs);
+            return;
+        }
+        s_joltForce.store(k, std::memory_order_release);
+        s_joltStartMs.store(GetTickCount64(), std::memory_order_release);
+        s_joltDurationMs.store(static_cast<uint32_t>(durationMs),
+                               std::memory_order_release);
+        if (log::DebugEnabled())
+            log::DebugF("[gwheel:ffb] jolt queued: kick=%+.3f dur=%dms", k, durationMs);
+    }
+
     void UpdateCenteringSpring(float absSpeedMps,
                                float angVelMagRad,
+                               float suspensionActivity,
                                float steer,
                                float throttle,
                                float brake,
@@ -837,6 +873,33 @@ namespace gwheel::wheel
         float constForce = -signSteer * steerShape * loadFactor * gripFactor * weightMul
                          * (static_cast<float>(activeTorqueStrengthPct) / 100.f);
         constForce *= reverseMul * rangeScale;
+
+        // Jolt overlay. A collision / bump event queues a linearly-decaying
+        // kick; overlay it onto constForce for the jolt's duration. Only
+        // applies while driving (this branch only runs when moving + FFB on),
+        // so paused menus / airborne flight don't play phantom jolts.
+        {
+            const uint64_t jStart = s_joltStartMs.load(std::memory_order_acquire);
+            const uint32_t jDur   = s_joltDurationMs.load(std::memory_order_acquire);
+            if (jDur > 0)
+            {
+                const uint64_t now = GetTickCount64();
+                if (now >= jStart && now - jStart < jDur)
+                {
+                    const float t = static_cast<float>(now - jStart)
+                                  / static_cast<float>(jDur);
+                    const float envelope = 1.f - t; // linear decay 1 → 0
+                    constForce += s_joltForce.load(std::memory_order_acquire)
+                                * envelope * rangeScale;
+                }
+                else
+                {
+                    // Expired — clear so we stop checking.
+                    s_joltDurationMs.store(0, std::memory_order_release);
+                }
+            }
+        }
+
         constForce = std::clamp(constForce, -1.f, 1.f);
 
         const int constPct = std::clamp(static_cast<int>(std::lround(constForce * 100.f)), -100, 100);
@@ -879,29 +942,57 @@ namespace gwheel::wheel
             s_lastDamperPct.store(damperPct, std::memory_order_release);
         }
 
-        // --- Road surface: always-on tarmac hum -------------------------
-        // Real pavement is never perfectly smooth — a small background
-        // vibration lifts the wheel out of the "dead" silent-between-
-        // forces feel. We use LogiPlaySurfaceEffect with a SINE wave at
-        // ~5.5 Hz (180 ms period) rather than the SDK's canned
-        // LogiPlayBumpyRoadEffect, which is tuned for rally games and
-        // feels like a machine gun at any noticeable magnitude.
+        // --- Road surface: driven by suspension activity ----------------
+        // Real controller rumble on CP2077 reacts to what's under each
+        // wheel — smooth asphalt is silent, cobbles / offroad / speedbumps
+        // rumble. We approximate that by watching the vehicle's angular-
+        // velocity derivative on the roll+pitch axes (computed by the
+        // caller from the per-tick Δω read). Yaw is excluded — that's
+        // dominated by steering input, not the road.
         //
-        // Peak magnitude caps at 6% — enough to hear the wheel "breathing"
-        // at cruise without being intrusive. Gate below speedSq=0.15 so
-        // parking-lot crawls stay silent.
+        // Envelope: fast attack, slow decay. A pothole spike opens the
+        // valve; the vibration trails out over ~400 ms rather than
+        // cutting hard. Gate below a small threshold so gentle cruising
+        // over perfect tarmac stays silent.
         //
-        // Per-surface variants (dirt, gravel, ice, off-road) would key off
-        // the game's material-under-each-wheel data, which we don't probe
-        // yet — that's a future pass.
+        // Period is 180 ms (SINE @ ~5.5 Hz) — we're modulating amplitude,
+        // not frequency. Per-surface variants (dirt, gravel, ice) would
+        // modulate the period and are a future pass.
+        // Tuning values chosen from 2026-04-23 driving log (1916 samples):
+        //   p50=0.023 p75=0.095 p90=0.232 p95=0.337 p99=0.672 max=11.8
+        //
+        // Envelope shape is deliberately asymmetric: SLOW ATTACK, FAST DECAY.
+        // A single transient spike (curb, pothole, steering jerk) barely
+        // moves the envelope, so curbs play as a clean directional jolt
+        // without a trailing SINE. SUSTAINED activity (driving on gravel,
+        // dirt, rough offroad) accumulates over many ticks into a steady
+        // background hum. This matches the intuitive separation:
+        //   transient events → jolt (short, directional)
+        //   continuous terrain → surface hum (low-frequency amplitude)
+        //
+        // Gate at 0.10 filters cruising noise. Gain 4.0 is needed to reach
+        // saturation during sustained activity (since the attack is so
+        // small each tick). Decay 0.85 → 10% remaining after ~14 ticks
+        // (~55 ms), enough to kill transients cleanly.
         constexpr int   kSurfacePeriodMs = 180;
-        constexpr float kSurfacePeakMag  = 0.06f;
-        constexpr float kSurfaceGate     = 0.15f;
-        const float bumpyMag = std::clamp((speedSq - kSurfaceGate) * 0.08f * rangeScale,
-                                          0.f, kSurfacePeakMag);
+        constexpr float kActivityGate    = 0.10f; // rad/s change per tick
+        constexpr float kActivityGain    = 4.00f; // maps raw Δω to envelope input
+        constexpr float kAttackCoef      = 0.08f; // LPF rise coef — slow; requires sustained activity
+        constexpr float kDecayCoef       = 0.85f; // LPF fall coef — fast; transient spikes die quickly
+        constexpr float kSurfacePeakMag  = 0.50f; // hard ceiling on magnitude
+
+        const float rawActivity = std::max(0.f, suspensionActivity - kActivityGate);
+        const float target      = std::clamp(rawActivity * kActivityGain, 0.f, kSurfacePeakMag);
+        float env = s_surfaceEnvelope.load(std::memory_order_acquire);
+        env = (target > env)
+                ? env + (target - env) * kAttackCoef
+                : env * kDecayCoef;
+        s_surfaceEnvelope.store(env, std::memory_order_release);
+
+        const float bumpyMag = std::clamp(env * rangeScale, 0.f, kSurfacePeakMag);
         const int bumpyPct   = std::clamp(static_cast<int>(std::lround(bumpyMag * 100.f)), 0, 100);
         const int prevB      = s_lastBumpyPct.load(std::memory_order_acquire);
-        if (prevB < 0 || std::abs(bumpyPct - prevB) >= 1)
+        if (prevB < 0 || std::abs(bumpyPct - prevB) >= 2)
         {
             if (bumpyPct == 0 && prevB > 0)
             {
@@ -914,17 +1005,21 @@ namespace gwheel::wheel
             s_lastBumpyPct.store(bumpyPct, std::memory_order_release);
         }
 
-        if (debugLog && (prevS < 0 || std::abs(coefPct - prevS) >= 5
+        static std::atomic<uint64_t> s_sampleTicks{0};
+        const uint64_t sampleN = s_sampleTicks.fetch_add(1, std::memory_order_relaxed) + 1;
+        const bool heartbeat = (sampleN % 120) == 0; // ~2 Hz at 250 Hz pump ≈ every 480ms
+        if (debugLog && (heartbeat
+                      || prevS < 0 || std::abs(coefPct - prevS) >= 5
                       || prevC == INT_MIN || std::abs(constPct - prevC) >= 5
                       || prevD < 0 || std::abs(damperPct - prevD) >= 5
                       || prevB < 0 || std::abs(bumpyPct - prevB) >= 5))
         {
-            log::DebugF("[gwheel:ffb] PUSH speed=%.2f yaw=%.2f steer=%+.2f br=%.2f th=%.2f rev=%d "
+            log::DebugF("[gwheel:ffb] PUSH speed=%.2f yaw=%.2f susp=%.3f steer=%+.2f br=%.2f th=%.2f rev=%d "
                         "cruise=%.1f base=%.2f vSq=%.2f yRatio=%.2f grip=%.2f load=%.2f weight=%.2f "
-                        "spring=%d%% active=%+d%% damper=%d%% bumpy=%d%%",
-                        absSpeedMps, angVelMagRad, steer, brake, throttle, isReversing ? 1 : 0,
+                        "spring=%d%% active=%+d%% damper=%d%% bumpy=%d%% env=%.3f",
+                        absSpeedMps, angVelMagRad, suspensionActivity, steer, brake, throttle, isReversing ? 1 : 0,
                         cruiseMps, centeringBaseline, speedSq, yawRatio, gripFactor, loadFactor, weightMul,
-                        coefPct, constPct, damperPct, bumpyPct);
+                        coefPct, constPct, damperPct, bumpyPct, env);
         }
     }
 }

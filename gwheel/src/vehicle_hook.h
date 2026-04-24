@@ -31,4 +31,10 @@ namespace gwheel::vehicle_hook
     // via the GWheel_Set/ClearPlayerVehicle natives. Passing nullptr
     // disables all injection (no player-driven vehicle).
     void SetPlayerVehicle(void* p);
+
+    // True iff `p` is the currently-cached player vehicle. Used by the
+    // collision/bump natives to gate jolts — the events fire for every
+    // visible vehicle (e.g. NPC traffic crashing off-screen) but only
+    // the player's hits should reach the wheel.
+    bool IsPlayerVehicle(void* p);
 }

@@ -142,6 +142,49 @@ namespace gwheel::rtti
             if (aOut) *aOut = true;
         }
 
+        // -------- Collision / bump feedback natives -------------------------
+        //
+        // Called from redscript @wrapMethod handlers on VehicleObject
+        // collision events (see gwheel_reds/gwheel_events.reds). Each
+        // native receives the vehicle handle + a signed lateral kick
+        // in [-1..+1] (negative = left-side hit, positive = right-side).
+        // The vehicle handle lets us filter out events from NPC cars /
+        // traffic — only the player's vehicle feeds the wheel.
+
+        void OnVehicleBump(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        {
+            RED4ext::Handle<RED4ext::ISerializable> handle;
+            float kick = 0.f;
+            RED4ext::GetParameter(aFrame, &handle);
+            RED4ext::GetParameter(aFrame, &kick);
+            aFrame->code++;
+            void* ptr = static_cast<void*>(handle.instance);
+            const bool isPlayer = vehicle_hook::IsPlayerVehicle(ptr);
+            if (log::DebugEnabled())
+                log::DebugF("[gwheel:evt] bump: kick=%+.3f vehicle=%p isPlayer=%d",
+                            kick, ptr, isPlayer ? 1 : 0);
+            if (isPlayer)
+                wheel::TriggerJolt(kick, 120); // short scrape
+            if (aOut) *aOut = true;
+        }
+
+        void OnVehicleHit(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        {
+            RED4ext::Handle<RED4ext::ISerializable> handle;
+            float kick = 0.f;
+            RED4ext::GetParameter(aFrame, &handle);
+            RED4ext::GetParameter(aFrame, &kick);
+            aFrame->code++;
+            void* ptr = static_cast<void*>(handle.instance);
+            const bool isPlayer = vehicle_hook::IsPlayerVehicle(ptr);
+            if (log::DebugEnabled())
+                log::DebugF("[gwheel:evt] hit: kick=%+.3f vehicle=%p isPlayer=%d",
+                            kick, ptr, isPlayer ? 1 : 0);
+            if (isPlayer)
+                wheel::TriggerJolt(kick, 280); // heavier impact
+            if (aOut) *aOut = true;
+        }
+
         // -------- Menu-state tracking ---------------------------------------
         //
         // Tells the plugin whether any gameplay-blocking menu is showing,
@@ -235,6 +278,13 @@ namespace gwheel::rtti
             RegisterGlobal(rtti, "GWheel_ClearPlayerVehicle",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&ClearPlayerVehicle),
                            "Bool", {});
+
+            RegisterGlobal(rtti, "GWheel_OnVehicleBump",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&OnVehicleBump),
+                           "Bool", {{ "handle:vehicleBaseObject", "v" }, { "Float", "lateralKick" }});
+            RegisterGlobal(rtti, "GWheel_OnVehicleHit",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&OnVehicleHit),
+                           "Bool", {{ "handle:vehicleBaseObject", "v" }, { "Float", "lateralKick" }});
 
 
             log::Info("[gwheel] native functions registered for redscript");

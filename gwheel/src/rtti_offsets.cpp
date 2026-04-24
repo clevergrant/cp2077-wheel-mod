@@ -137,6 +137,8 @@ namespace gwheel::rtti_offsets
         DumpClassProperties("vehicleBaseObject");
         DumpClassProperties("vehiclePhysicsData");
         DumpClassProperties("vehicleWheeledPhysics");
+        DumpClassProperties("vehiclePersistentDataPS");
+        DumpClassProperties("vehicleWheelRuntimePSData");
         log::Info("[gwheel:rtti-off] ======== offset resolution complete ========");
 
         st.ready.store(true, std::memory_order_release);

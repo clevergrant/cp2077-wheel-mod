@@ -37,3 +37,10 @@ public static native func GWheel_SetInputBinding(inputId: Int32, action: Int32) 
 // wrappers.
 public static native func GWheel_SetPlayerVehicle(v: ref<VehicleObject>) -> Bool;
 public static native func GWheel_ClearPlayerVehicle() -> Bool;
+
+// Collision / bump feedback. lateralKick is the world-space hit direction
+// dotted with the vehicle's right vector, signed in [-1..+1] (negative =
+// struck on left). The plugin filters out events from non-player vehicles
+// using the handle; we still forward every event for simplicity.
+public static native func GWheel_OnVehicleBump(v: ref<VehicleObject>, lateralKick: Float) -> Bool;
+public static native func GWheel_OnVehicleHit(v: ref<VehicleObject>, lateralKick: Float) -> Bool;

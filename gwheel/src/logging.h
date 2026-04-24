@@ -42,14 +42,18 @@ namespace gwheel::log
     }
 
     inline void Trace(const char* msg)    { auto& c = Ctx(); if (c.sdk && c.sdk->logger) detail::Dispatch(c.sdk->logger->Trace,    msg); }
-    inline void Debug(const char* msg)    { if (!DebugEnabled()) return; auto& c = Ctx(); if (c.sdk && c.sdk->logger) detail::Dispatch(c.sdk->logger->Debug, msg); }
+    // Debug lines are routed through Info when DebugEnabled() is true, because
+    // RED4ext's spdlog sink filters out Debug level messages at the file-sink
+    // level regardless of our app-level gate. Promoting to Info guarantees
+    // they reach disk. No-op when DebugEnabled() is false.
+    inline void Debug(const char* msg)    { if (!DebugEnabled()) return; auto& c = Ctx(); if (c.sdk && c.sdk->logger) detail::Dispatch(c.sdk->logger->Info, msg); }
     inline void Info(const char* msg)     { auto& c = Ctx(); if (c.sdk && c.sdk->logger) detail::Dispatch(c.sdk->logger->Info,     msg); }
     inline void Warn(const char* msg)     { auto& c = Ctx(); if (c.sdk && c.sdk->logger) detail::Dispatch(c.sdk->logger->Warn,     msg); }
     inline void Error(const char* msg)    { auto& c = Ctx(); if (c.sdk && c.sdk->logger) detail::Dispatch(c.sdk->logger->Error,    msg); }
     inline void Critical(const char* msg) { auto& c = Ctx(); if (c.sdk && c.sdk->logger) detail::Dispatch(c.sdk->logger->Critical, msg); }
 
     inline void TraceF(const char* fmt, ...)    { auto& c = Ctx(); if (!c.sdk || !c.sdk->logger) return; va_list a; va_start(a, fmt); detail::DispatchF(c.sdk->logger->Trace,    fmt, a); va_end(a); }
-    inline void DebugF(const char* fmt, ...)    { if (!DebugEnabled()) return; auto& c = Ctx(); if (!c.sdk || !c.sdk->logger) return; va_list a; va_start(a, fmt); detail::DispatchF(c.sdk->logger->Debug, fmt, a); va_end(a); }
+    inline void DebugF(const char* fmt, ...)    { if (!DebugEnabled()) return; auto& c = Ctx(); if (!c.sdk || !c.sdk->logger) return; va_list a; va_start(a, fmt); detail::DispatchF(c.sdk->logger->Info, fmt, a); va_end(a); }
     inline void InfoF(const char* fmt, ...)     { auto& c = Ctx(); if (!c.sdk || !c.sdk->logger) return; va_list a; va_start(a, fmt); detail::DispatchF(c.sdk->logger->Info,     fmt, a); va_end(a); }
     inline void WarnF(const char* fmt, ...)     { auto& c = Ctx(); if (!c.sdk || !c.sdk->logger) return; va_list a; va_start(a, fmt); detail::DispatchF(c.sdk->logger->Warn,     fmt, a); va_end(a); }
     inline void ErrorF(const char* fmt, ...)    { auto& c = Ctx(); if (!c.sdk || !c.sdk->logger) return; va_list a; va_start(a, fmt); detail::DispatchF(c.sdk->logger->Error,    fmt, a); va_end(a); }

@@ -50,6 +50,16 @@ namespace gwheel::wheel
     void SetGlobalStrength(float mul);   // 0..1 multiplier applied to all effect magnitudes
     void StopAll();
 
+    // Fire a one-shot directional jolt on the wheel. `lateralKick` is signed
+    // in [-1..+1] — negative = kick toward the left, positive = toward the
+    // right. `durationMs` controls the decay window; the effect overlays on
+    // the normal active torque for that many ms with a linear falloff.
+    //
+    // Called from redscript collision / bump event wrappers (see
+    // gwheel_reds/gwheel_events.reds). Jolts only play during active
+    // driving; they're ignored when FFB is disabled, airborne, or stopped.
+    void TriggerJolt(float lateralKick, int durationMs);
+
     // Physics-model self-centering FFB. Three layered forces, edge-triggered
     // and safe to call every tick:
     //
@@ -97,8 +107,17 @@ namespace gwheel::wheel
     //   activeForce = −sign(steer) × steerShape × loadFactor × gripFactor
     //                 × weight × activeTorqueStrengthPct/100 × reverseMul
     //   damperCoef  = clamp(speedSq × 0.4, 0, 0.5)
+    //
+    // suspensionActivity drives the road-surface SINE effect. It's the
+    // magnitude of the roll+pitch components of the vehicle's angular-
+    // velocity derivative |Δω_x|+|Δω_y| (yaw excluded — that comes from
+    // steering input, not the road). Smooth asphalt ≈ 0 so the wheel goes
+    // silent; cobbles / offroad / speedbumps spike the signal and the
+    // wheel vibrates proportionally. Caller computes the derivative each
+    // tick by diffing against the previous angular-velocity read.
     void UpdateCenteringSpring(float absSpeedMps,
                                float angVelMagRad,
+                               float suspensionActivity,
                                float steer,
                                float throttle,
                                float brake,
