@@ -679,6 +679,18 @@ namespace gwheel::wheel
         LogiStopCarAirborne(idx);
     }
 
+    // Surface-driven baseline magnitude for the road-surface SINE.
+    // Written by SetSurfaceBaselineMag (called from the redscript
+    // material poller via the GWheel_OnWheelMaterial native's C++
+    // dispatch), read by UpdateCenteringSpring. 0 = no baseline
+    // (asphalt-class); positive = constant hum of that magnitude.
+    std::atomic<float> s_surfaceBaselineMag{0.f};
+
+    void SetSurfaceBaselineMag(float mag)
+    {
+        s_surfaceBaselineMag.store(std::clamp(mag, 0.f, 0.5f), std::memory_order_relaxed);
+    }
+
     void TriggerJolt(float lateralKick, int durationMs)
     {
         using namespace centering_state;
@@ -703,6 +715,7 @@ namespace gwheel::wheel
     void UpdateCenteringSpring(float absSpeedMps,
                                float angVelMagRad,
                                float suspensionActivity,
+                               float lateralVelocityMps,
                                float steer,
                                float throttle,
                                float brake,
@@ -874,6 +887,36 @@ namespace gwheel::wheel
                          * (static_cast<float>(activeTorqueStrengthPct) / 100.f);
         constForce *= reverseMul * rangeScale;
 
+        // --- Slip-angle countersteer nudge --------------------------------
+        // Past peak slip real SAT flips sign and pulls the steering wheel
+        // toward the direction of travel — the "self-correcting" pull that
+        // teaches drivers to countersteer instinctively. The effect scales
+        // with slip angle (approximated here by lateral velocity in the
+        // car's local frame) and with how much grip has been lost.
+        //
+        // gripFactor == 1 (grip) → no contribution.
+        // gripFactor < 1 (slide) → force proportional to |lateralVel|,
+        //   in the direction of lateralVel (positive = sliding rightward
+        //   → wheel pulled rightward, which IS countersteer for a
+        //   right-side slide; the driver's natural "follow the wheel"
+        //   response yields correct opposite-lock steering).
+        //
+        // 6 m/s of lateral velocity saturates the contribution; cap at
+        // 70% so the wheel can still be held / controlled during the
+        // biggest drifts. activeTorquePct scales with the rest of the
+        // active torque so user tuning affects this uniformly.
+        constexpr float kLatVelSaturate = 6.0f;
+        constexpr float kCountersteerGain = 0.70f;
+        const float deadband   = 0.5f;  // don't trigger below slight slide
+        const float slipMag    = std::max(0.f, std::fabs(lateralVelocityMps) - deadband);
+        const float slipSign   = (lateralVelocityMps > 0.f) ? 1.f : -1.f;
+        const float slipNorm   = std::clamp(slipMag / kLatVelSaturate, 0.f, 1.f);
+        const float counterForce = slipSign * slipNorm * (1.f - gripFactor)
+                                 * kCountersteerGain
+                                 * (static_cast<float>(activeTorqueStrengthPct) / 100.f)
+                                 * reverseMul * rangeScale;
+        constForce += counterForce;
+
         // Jolt overlay. A collision / bump event queues a linearly-decaying
         // kick; overlay it onto constForce for the jolt's duration. Only
         // applies while driving (this branch only runs when moving + FFB on),
@@ -989,7 +1032,14 @@ namespace gwheel::wheel
                 : env * kDecayCoef;
         s_surfaceEnvelope.store(env, std::memory_order_release);
 
-        const float bumpyMag = std::clamp(env * rangeScale, 0.f, kSurfacePeakMag);
+        // Blend in the surface-CName-driven baseline. Max() rather than
+        // add: on textured surfaces the baseline sets a floor so the
+        // wheel always hums; transient suspension spikes still poke
+        // above it when they arrive. Asphalt/concrete have baseline=0
+        // so this is a no-op on pavement.
+        const float surfBaseline = s_surfaceBaselineMag.load(std::memory_order_relaxed);
+        const float combined     = std::max(env, surfBaseline);
+        const float bumpyMag     = std::clamp(combined * rangeScale, 0.f, kSurfacePeakMag);
         const int bumpyPct   = std::clamp(static_cast<int>(std::lround(bumpyMag * 100.f)), 0, 100);
         const int prevB      = s_lastBumpyPct.load(std::memory_order_acquire);
         if (prevB < 0 || std::abs(bumpyPct - prevB) >= 2)
@@ -1014,12 +1064,13 @@ namespace gwheel::wheel
                       || prevD < 0 || std::abs(damperPct - prevD) >= 5
                       || prevB < 0 || std::abs(bumpyPct - prevB) >= 5))
         {
-            log::DebugF("[gwheel:ffb] PUSH speed=%.2f yaw=%.2f susp=%.3f steer=%+.2f br=%.2f th=%.2f rev=%d "
+            log::DebugF("[gwheel:ffb] PUSH speed=%.2f yaw=%.2f susp=%.3f latV=%+.2f steer=%+.2f br=%.2f th=%.2f rev=%d "
                         "cruise=%.1f base=%.2f vSq=%.2f yRatio=%.2f grip=%.2f load=%.2f weight=%.2f "
-                        "spring=%d%% active=%+d%% damper=%d%% bumpy=%d%% env=%.3f",
-                        absSpeedMps, angVelMagRad, suspensionActivity, steer, brake, throttle, isReversing ? 1 : 0,
+                        "spring=%d%% active=%+d%% damper=%d%% bumpy=%d%% env=%.3f ctr=%+.2f",
+                        absSpeedMps, angVelMagRad, suspensionActivity, lateralVelocityMps,
+                        steer, brake, throttle, isReversing ? 1 : 0,
                         cruiseMps, centeringBaseline, speedSq, yawRatio, gripFactor, loadFactor, weightMul,
-                        coefPct, constPct, damperPct, bumpyPct, env);
+                        coefPct, constPct, damperPct, bumpyPct, env, counterForce);
         }
     }
 }

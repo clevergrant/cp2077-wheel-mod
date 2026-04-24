@@ -37,4 +37,11 @@ namespace gwheel::vehicle_hook
     // visible vehicle (e.g. NPC traffic crashing off-screen) but only
     // the player's hits should reach the wheel.
     bool IsPlayerVehicle(void* p);
+
+    // Called by the GWheel_SampleWheelMaterials native (redscript-side
+    // PersistencySystem polling forwards the `vehiclePersistentDataPS`
+    // handle each tick). Reads the 4 per-wheel CName hashes at offset
+    // 0x78 and logs transitions. `psPointer` is the raw instance ptr
+    // from the redscript Handle; nullptr is ignored.
+    void OnPersistentStateSample(void* psPointer);
 }

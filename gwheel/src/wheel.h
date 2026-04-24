@@ -60,6 +60,15 @@ namespace gwheel::wheel
     // driving; they're ignored when FFB is disabled, airborne, or stopped.
     void TriggerJolt(float lateralKick, int durationMs);
 
+    // Set the baseline road-surface SINE magnitude (0..1) driven by the
+    // current material under the player vehicle (redscript raycast
+    // polling). This is combined via max() with the suspension-activity
+    // envelope inside UpdateCenteringSpring — smooth asphalt has a
+    // baseline of 0 (suspension activity drives everything), textured
+    // surfaces (gravel / dirt / metal grates) maintain a constant hum
+    // even when the chassis isn't being physically agitated.
+    void SetSurfaceBaselineMag(float mag);
+
     // Physics-model self-centering FFB. Three layered forces, edge-triggered
     // and safe to call every tick:
     //
@@ -115,9 +124,17 @@ namespace gwheel::wheel
     // silent; cobbles / offroad / speedbumps spike the signal and the
     // wheel vibrates proportionally. Caller computes the derivative each
     // tick by diffing against the previous angular-velocity read.
+    //
+    // lateralVelocityMps is the car-LOCAL lateral velocity component:
+    // dot(worldVelocity, vehicle.GetWorldRight()). Signed — positive =
+    // sliding rightward, negative = sliding leftward, near-zero in
+    // normal grip. The update adds a countersteer nudge to the active
+    // torque when gripFactor drops, pulling the wheel toward the
+    // direction of travel (mirrors real SAT past peak slip).
     void UpdateCenteringSpring(float absSpeedMps,
                                float angVelMagRad,
                                float suspensionActivity,
+                               float lateralVelocityMps,
                                float steer,
                                float throttle,
                                float brake,

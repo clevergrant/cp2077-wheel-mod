@@ -185,6 +185,44 @@ namespace gwheel::rtti
             if (aOut) *aOut = true;
         }
 
+        // Map a material CName hash to a baseline road-surface SINE
+        // magnitude (0..1). Hashes captured from 2026-04-24 log.
+        //
+        // All-zero for now. A non-zero baseline plays a constant 5.5 Hz
+        // SINE regardless of physics activity, which feels like the wheel
+        // is oscillating nonstop — confirmed by user on 2026-04-24 after
+        // first pass with metal=0.12 / unknown=0.10. Re-introduce values
+        // only when we've (a) captured dirt / gravel CNames to tune
+        // against and (b) got reliable per-tick material reads (no more
+        // alternating hits on the car body).
+        float SurfaceBaselineForMaterial(uint64_t /*hash*/)
+        {
+            return 0.f;
+        }
+
+        // Per-wheel material report from the redscript raycast poller
+        // (see gwheel_reds/gwheel_surface.reds). wheelIdx is 0..3
+        // (FL/FR/RL/RR by convention), material is the CName of the
+        // physics material under that wheel's raycast hit. Called
+        // on transitions only.
+        void OnWheelMaterial(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        {
+            int32_t idx = -1;
+            RED4ext::CName mat;
+            RED4ext::GetParameter(aFrame, &idx);
+            RED4ext::GetParameter(aFrame, &mat);
+            aFrame->code++;
+            const char* name = RED4ext::CNamePool::Get(mat);
+            const float baseline = SurfaceBaselineForMaterial(mat.hash);
+            wheel::SetSurfaceBaselineMag(baseline);
+            log::InfoF("[gwheel:surface] wheel[%d] material: %s (hash=0x%016llX) baseline=%.2f",
+                       idx,
+                       name ? name : "(null)",
+                       static_cast<unsigned long long>(mat.hash),
+                       baseline);
+            if (aOut) *aOut = true;
+        }
+
         // -------- Menu-state tracking ---------------------------------------
         //
         // Tells the plugin whether any gameplay-blocking menu is showing,
@@ -275,6 +313,10 @@ namespace gwheel::rtti
             RegisterGlobal(rtti, "GWheel_OnVehicleHit",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&OnVehicleHit),
                            "Bool", {{ "handle:vehicleBaseObject", "v" }, { "Float", "lateralKick" }});
+
+            RegisterGlobal(rtti, "GWheel_OnWheelMaterial",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&OnWheelMaterial),
+                           "Bool", {{ "Int32", "wheelIdx" }, { "CName", "material" }});
 
 
             log::Info("[gwheel] native functions registered for redscript");

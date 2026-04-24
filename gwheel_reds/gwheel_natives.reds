@@ -40,3 +40,10 @@ public static native func GWheel_ClearPlayerVehicle() -> Bool;
 // using the handle; we still forward every event for simplicity.
 public static native func GWheel_OnVehicleBump(v: ref<VehicleObject>, lateralKick: Float) -> Bool;
 public static native func GWheel_OnVehicleHit(v: ref<VehicleObject>, lateralKick: Float) -> Bool;
+
+// Per-wheel road material report. Called from the redscript raycast
+// poller (see gwheel_surface.reds) when a wheel's material CName
+// changes. wheelIdx is 0..3, material is the physics material CName
+// (e.g. `asphalt`, `dirt`, `metal`). C++ logs the transition and
+// eventually drives surface-aware FFB off the category.
+public static native func GWheel_OnWheelMaterial(wheelIdx: Int32, material: CName) -> Bool;

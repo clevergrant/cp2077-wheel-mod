@@ -17,6 +17,7 @@
 #include <RED4ext/Handle.hpp>
 #include <RED4ext/ISerializable.hpp>
 #include <RED4ext/Scripting/CProperty.hpp>
+#include <RED4ext/Scripting/Natives/Generated/Vector4.hpp>
 #include <RED4ext/Scripting/Utils.hpp>
 
 #include <atomic>
@@ -83,6 +84,14 @@ namespace gwheel::vehicle_hook
         std::atomic<RED4ext::CClassFunction*> g_getVehiclePSFn{nullptr};
         std::atomic<bool>                     g_getVehiclePSLookupTried{false};
 
+        // Cached RTTI handle for vehicleBaseObject::GetWorldRight(),
+        // inherited from gameObject / entEntity. Returns the vehicle's
+        // right-axis unit vector in world space. Dotted with the linear
+        // velocity, gives the car-local lateral velocity component —
+        // the key input for slip-angle / countersteer FFB.
+        std::atomic<RED4ext::CClassFunction*> g_getWorldRightFn{nullptr};
+        std::atomic<bool>                     g_getWorldRightLookupTried{false};
+
         // Per-wheel material hashes from the last tick (CName hashes are
         // uint64_t). Initialised to 0; any non-zero change is logged.
         // Index 0-3 = wheel 0-3 (typically FL / FR / RL / RR).
@@ -127,6 +136,13 @@ namespace gwheel::vehicle_hook
         std::atomic<float> g_prevAngVelX{0.f};
         std::atomic<float> g_prevAngVelY{0.f};
 
+        // Previous tick's vertical linear velocity (world Z). Drives the
+        // OTHER half of the suspension-activity signal: bouncing up/down
+        // on dirt/gravel registers as |Δvz| even when chassis rotation
+        // barely moves. Smooth asphalt at cruise ≈ 0; rough terrain
+        // spikes the signal.
+        std::atomic<float> g_prevLinVelZ{0.f};
+
         // Resolve vehicleBaseObject::GetVehiclePS once, return null on
         // failure (logged once). Pattern mirrors ReadVehicleSpeed below.
         RED4ext::CClassFunction* GetVehiclePSFn()
@@ -168,7 +184,10 @@ namespace gwheel::vehicle_hook
         void LogPSDiagnostic(RED4ext::ISerializable* ps)
         {
             if (!ps) return;
-            if (g_psDiagnosticLogged.exchange(true, std::memory_order_acq_rel)) return;
+            // Latch per-pointer so repeated probes of the same object
+            // are silent but each distinct candidate gets one dump.
+            static std::atomic<RED4ext::ISerializable*> s_lastDumped{nullptr};
+            if (s_lastDumped.exchange(ps, std::memory_order_acq_rel) == ps) return;
 
             // RTTI class name of the actual runtime type.
             const char* typeName = "?";
@@ -211,54 +230,185 @@ namespace gwheel::vehicle_hook
             return 0;
         }
 
+        // Test a candidate PS pointer for wheelRuntimeData. If the
+        // pointer's runtime type (or its parent chain) exposes the
+        // wheelRuntimeData property, log + return its offset. Zero if
+        // this pointer is the wrong type.
+        uint32_t TryResolveWheelDataOnPointer(RED4ext::ISerializable* obj,
+                                              const char* sourceLabel)
+        {
+            if (!obj) return 0;
+            auto* type = obj->GetType();
+            if (!type) return 0;
+            const char* typeName = type->GetName().ToString();
+            const uint32_t off = ResolveWheelDataOffset(type);
+            log::InfoF("[gwheel:surface] probe via %s: ptr=%p type=%s wheelRuntimeData@=0x%X",
+                       sourceLabel, obj, typeName ? typeName : "?", off);
+            return off;
+        }
+
+        // Probe the vehicle struct's `persistentState` handle (offset
+        // 0x168 on vehicleBaseObject, type `handle:gamePersistentState`)
+        // for wheelRuntimeData. This is the Path A / back-pointer
+        // alternative — GetVehiclePS() on this build returns a sibling
+        // `VehicleComponentPS` class that doesn't carry wheel data.
+        // Returns the wheelRuntimeData offset if the PS at 0x168 is
+        // actually a subclass of vehiclePersistentDataPS; otherwise 0.
+        RED4ext::ISerializable* ReadPersistentStateHandle(void* self)
+        {
+            if (!self) return nullptr;
+            auto* bytes = reinterpret_cast<const char*>(self);
+            // Handle<T> is {T* instance, RefCntPtr<...> rc}; the first
+            // 8 bytes are the raw instance pointer.
+            return *reinterpret_cast<RED4ext::ISerializable* const*>(
+                bytes + kVehicleBaseObject_persistentState);
+        }
+
+        // Where the currently-resolved wheel-data pointer comes from.
+        // 0 = unresolved / failed. 1 = vehicle+0x168 persistentState
+        // pointer. 2 = handle returned by GetVehiclePS(). Written once,
+        // read hot-path.
+        std::atomic<int> g_psSource{0};
+
         // Read the 4 per-wheel material CName hashes for this vehicle.
         // Returns true on success; `out` indices 0-3 hold the hashes
         // (0 = no material / read failed for that wheel).
         bool ReadWheelMaterials(void* self, uint64_t out[4])
         {
             out[0] = out[1] = out[2] = out[3] = 0;
-            // Permanently disabled once we've confirmed the current route
-            // can't reach the data. Re-enable by clearing this latch if a
-            // new resolution path is wired up.
             if (g_surfaceLookupFailed.load(std::memory_order_acquire)) return false;
 
-            auto* fn = GetVehiclePSFn();
-            if (!fn) return false;
-
-            RED4ext::Handle<RED4ext::ISerializable> psHandle;
-            RED4ext::ExecuteFunction(self, fn, &psHandle);
-            if (!psHandle.instance) return false;
-
-            LogPSDiagnostic(psHandle.instance);
-
+            // One-shot probe across both paths. Prefer the one that
+            // actually finds wheelRuntimeData on its object's class chain.
             uint32_t off = g_psWheelDataOffset.load(std::memory_order_acquire);
+            int source   = g_psSource.load(std::memory_order_acquire);
+
             if (off == 0)
             {
-                auto* type = psHandle.instance->GetType();
-                if (!type) return false;
-                const uint32_t resolved = ResolveWheelDataOffset(type);
-                if (resolved > 0)
+                // Path A: vehicle.persistentState at +0x168.
+                // RTTI says `handle:gamePersistentState`. In RED4ext a
+                // Handle<T> is {T* instance, RefCnt*}; for WeakHandle /
+                // Ref<T> the layout differs. Dump raw bytes so we can
+                // decode whichever storage variant CDPR used.
                 {
-                    g_psWheelDataOffset.store(resolved, std::memory_order_release);
-                    off = resolved;
-                    log::InfoF("[gwheel:surface] wheelRuntimeData resolved: offset=0x%X on %s",
-                               resolved, type->GetName().ToString());
+                    auto* bytes = reinterpret_cast<const uint64_t*>(
+                        reinterpret_cast<const char*>(self)
+                        + kVehicleBaseObject_persistentState);
+                    log::InfoF("[gwheel:surface] raw vehicle+0x168 words: %016llX %016llX %016llX %016llX",
+                               (unsigned long long)bytes[0],
+                               (unsigned long long)bytes[1],
+                               (unsigned long long)bytes[2],
+                               (unsigned long long)bytes[3]);
                 }
-                else
+
+                // Try each candidate pointer read of the 4 words above.
+                // Whichever interpretation yields a valid RTTI-typed
+                // object wins.
+                for (int variant = 0; variant < 2 && off == 0; ++variant)
+                {
+                    const auto byteOff = kVehicleBaseObject_persistentState
+                                       + variant * static_cast<std::ptrdiff_t>(sizeof(void*));
+                    auto* candidate = *reinterpret_cast<RED4ext::ISerializable* const*>(
+                        reinterpret_cast<const char*>(self) + byteOff);
+                    if (!candidate) continue;
+                    // Basic sanity: plausible heap pointer.
+                    if (reinterpret_cast<uintptr_t>(candidate) < 0x10000) continue;
+                    char label[32];
+                    std::snprintf(label, sizeof(label), "vehicle+0x%03llX",
+                                  (unsigned long long)byteOff);
+                    LogPSDiagnostic(candidate);
+                    const uint32_t a = TryResolveWheelDataOnPointer(candidate, label);
+                    if (a > 0)
+                    {
+                        off    = a;
+                        source = 1;
+                    }
+                }
+
+                // Path B fallback: GetVehiclePS() (known to return
+                // VehicleComponentPS on this build — sibling class,
+                // no wheelRuntimeData).
+                if (off == 0)
+                {
+                    if (auto* fn = GetVehiclePSFn())
+                    {
+                        RED4ext::Handle<RED4ext::ISerializable> psHandle;
+                        RED4ext::ExecuteFunction(self, fn, &psHandle);
+                        if (psHandle.instance)
+                        {
+                            const uint32_t b = TryResolveWheelDataOnPointer(
+                                psHandle.instance, "GetVehiclePS()");
+                            if (b > 0)
+                            {
+                                off    = b;
+                                source = 2;
+                            }
+                        }
+                    }
+                }
+
+                if (off == 0)
                 {
                     g_surfaceLookupFailed.store(true, std::memory_order_release);
-                    log::WarnF("[gwheel:surface] wheelRuntimeData not found on %s — surface reads disabled "
-                               "(VehicleComponentPS and vehiclePersistentDataPS are sibling classes; needs a different route)",
-                               type->GetName().ToString());
+                    log::Warn("[gwheel:surface] wheelRuntimeData not reachable via either probe — surface reads disabled");
                     return false;
                 }
+                g_psWheelDataOffset.store(off, std::memory_order_release);
+                g_psSource.store(source, std::memory_order_release);
+                log::InfoF("[gwheel:surface] RESOLVED — source=%d offset=0x%X", source, off);
             }
 
-            auto* psBytes = reinterpret_cast<const char*>(psHandle.instance);
+            // Re-fetch the PS pointer from the chosen source each tick
+            // (cheap: pointer read for path A, ExecuteFunction for B).
+            RED4ext::ISerializable* ps = nullptr;
+            if (source == 1)
+            {
+                ps = ReadPersistentStateHandle(self);
+            }
+            else if (source == 2)
+            {
+                if (auto* fn = GetVehiclePSFn())
+                {
+                    RED4ext::Handle<RED4ext::ISerializable> psHandle;
+                    RED4ext::ExecuteFunction(self, fn, &psHandle);
+                    ps = psHandle.instance;
+                }
+            }
+            if (!ps) return false;
+
+            auto* psBytes = reinterpret_cast<const char*>(ps);
             for (int i = 0; i < 4; ++i)
             {
                 out[i] = *reinterpret_cast<const uint64_t*>(psBytes + off + i * kPS_wheelEntryStride);
             }
+            return true;
+        }
+
+        // Resolve vehicleBaseObject::GetWorldRight once, returning the
+        // per-tick world-space right unit vector of the vehicle. Used
+        // by the slip-angle computation.
+        bool ReadWorldRight(void* self, RED4ext::Vector4& out)
+        {
+            auto* fn = g_getWorldRightFn.load(std::memory_order_acquire);
+            if (!fn)
+            {
+                if (g_getWorldRightLookupTried.exchange(true, std::memory_order_acq_rel))
+                    return false;
+                auto* rtti = RED4ext::CRTTISystem::Get();
+                if (!rtti) return false;
+                auto* cls = rtti->GetClass(RED4ext::CName("vehicleBaseObject"));
+                if (!cls) return false;
+                auto* resolved = cls->GetFunction(RED4ext::CName("GetWorldRight"));
+                if (!resolved)
+                {
+                    log::Warn("[gwheel:hook] RTTI method 'GetWorldRight' not found — slip-angle disabled");
+                    return false;
+                }
+                g_getWorldRightFn.store(resolved, std::memory_order_release);
+                fn = resolved;
+                log::InfoF("[gwheel:hook] RTTI resolved: vehicleBaseObject::GetWorldRight -> %p", resolved);
+            }
+            RED4ext::ExecuteFunction(self, fn, &out);
             return true;
         }
 
@@ -404,35 +554,55 @@ namespace gwheel::vehicle_hook
                 const float prevY = g_prevAngVelY.load(std::memory_order_acquire);
                 const float dX = std::fabs(angVel[0] - prevX);
                 const float dY = std::fabs(angVel[1] - prevY);
-                const float suspensionActivity = dX + dY;
                 g_prevAngVelX.store(angVel[0], std::memory_order_release);
                 g_prevAngVelY.store(angVel[1], std::memory_order_release);
 
-                // Per-wheel road surface material read. Game authors this
-                // as a CName on WheelRuntimePSData.previousTouchedMaterial;
-                // controller rumble uses the same source. Log transitions
-                // so we can see the raw CName set for asphalt / dirt /
-                // gravel / etc. — first pass is diagnostic-only; we'll map
-                // names to FFB categories in a follow-up once the log
-                // shows what values actually fire.
-                uint64_t mats[4] = {};
-                if (ReadWheelMaterials(self, mats))
+                // Vertical linear velocity derivative. Reads world-Z
+                // from PhysicsData (same source as the existing velocity
+                // read — cheap, no extra RTTI call). Δvz captures the
+                // up/down bounce that dirt/gravel produces even when
+                // chassis rotation is small. Coefficient scales m/s
+                // into roughly the same range as rad/s for blending.
+                float linVel[3] = {};
+                float dVz = 0.f;
+                bool  haveLinVel = vehicle_ext::ReadVelocity(self, linVel);
+                if (haveLinVel)
                 {
-                    for (int i = 0; i < 4; ++i)
+                    const float prevZ = g_prevLinVelZ.load(std::memory_order_acquire);
+                    dVz = std::fabs(linVel[2] - prevZ);
+                    g_prevLinVelZ.store(linVel[2], std::memory_order_release);
+                }
+                const float suspensionActivity = dX + dY + 0.8f * dVz;
+
+                // Slip-angle proxy. Dot linear velocity with the car's
+                // world-space right vector to get lateral velocity in
+                // car-local frame. Positive = sliding rightward,
+                // negative = sliding leftward. During a drift this
+                // component is non-zero while the gripFactor approaches
+                // 0; the FFB layer uses both together to add a
+                // countersteer nudge that lightens toward the direction
+                // of travel (matches what a real SAT does past peak slip).
+                float lateralVelocityMps = 0.f;
+                {
+                    RED4ext::Vector4 right{};
+                    if (haveLinVel && ReadWorldRight(self, right))
                     {
-                        const uint64_t prev = g_lastWheelMat[i].load(std::memory_order_acquire);
-                        if (mats[i] != prev)
-                        {
-                            g_lastWheelMat[i].store(mats[i], std::memory_order_release);
-                            RED4ext::CName cname; cname.hash = mats[i];
-                            const char* name = RED4ext::CNamePool::Get(cname);
-                            log::InfoF("[gwheel:surface] wheel[%d] material: %s (hash=0x%016llX)",
-                                       i,
-                                       name ? name : "(null)",
-                                       static_cast<unsigned long long>(mats[i]));
-                        }
+                        lateralVelocityMps = linVel[0] * right.X
+                                           + linVel[1] * right.Y
+                                           + linVel[2] * right.Z;
                     }
                 }
+
+                // Per-wheel road surface material is NOT read from the
+                // detour: the only live source in CP2077 is physics-
+                // raycast `TraceResult.material`, which we call from
+                // redscript via SpatialQueriesSystem (see
+                // gwheel_reds/gwheel_surface.reds). The redscript poller
+                // forwards each wheel's material CName through the
+                // GWheel_OnWheelMaterial native. The prior attempts via
+                // vehiclePersistentDataPS.wheelRuntimeData turned out to
+                // be save-state infrastructure (written at save/unload
+                // boundaries, not per-frame).
 
                 // Per-car physics snapshot drives yaw reference, cruise
                 // speed, and centering-baseline derivation. Hardcoded
@@ -540,6 +710,7 @@ namespace gwheel::vehicle_hook
                     speed,
                     angVelMag,
                     suspensionActivity,
+                    lateralVelocityMps,
                     torqueSteer,
                     veh->acceleration,  // post-merge throttle (0..1)
                     veh->deceleration,  // post-merge brake (0..1)
@@ -559,7 +730,7 @@ namespace gwheel::vehicle_hook
                 // FFB master toggle off — release every effect. Calling
                 // Update with enabled=false performs the edge teardown
                 // (spring, active, damper, road surface, airborne).
-                wheel::UpdateCenteringSpring(0.f, 0.f, 0.f, 0.f, 0.f, 0.f, false, true, /*enabled*/ false,
+                wheel::UpdateCenteringSpring(0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, false, true, /*enabled*/ false,
                                              0.f, 1.f, 1.f, 0, 1.f, 0, cfg.ffb.debugLogging);
             }
         }
@@ -634,6 +805,7 @@ namespace gwheel::vehicle_hook
             g_perCarYawRef.store(0.f, std::memory_order_release);
             g_prevAngVelX.store(0.f, std::memory_order_release);
             g_prevAngVelY.store(0.f, std::memory_order_release);
+            g_prevLinVelZ.store(0.f, std::memory_order_release);
             for (int i = 0; i < 4; ++i)
                 g_lastWheelMat[i].store(0, std::memory_order_release);
         }
@@ -646,5 +818,35 @@ namespace gwheel::vehicle_hook
     bool IsPlayerVehicle(void* p)
     {
         return p != nullptr && g_playerVehicle.load(std::memory_order_acquire) == p;
+    }
+
+    void OnPersistentStateSample(void* psPointer)
+    {
+        if (!psPointer) return;
+
+        auto* ser = reinterpret_cast<RED4ext::ISerializable*>(psPointer);
+        LogPSDiagnostic(ser);
+
+        // Read the 4 per-wheel CName hashes at offset 0x78, entry
+        // stride 0x18 (matches vehiclePersistentDataPS layout confirmed
+        // by RTTI on this build). Log transitions only so idle cars
+        // stay silent.
+        const auto* bytes = reinterpret_cast<const char*>(psPointer);
+        for (int i = 0; i < 4; ++i)
+        {
+            const uint64_t hash = *reinterpret_cast<const uint64_t*>(
+                bytes + 0x78 + i * kPS_wheelEntryStride);
+            const uint64_t prev = g_lastWheelMat[i].load(std::memory_order_acquire);
+            if (hash != prev)
+            {
+                g_lastWheelMat[i].store(hash, std::memory_order_release);
+                RED4ext::CName cname; cname.hash = hash;
+                const char* name = RED4ext::CNamePool::Get(cname);
+                log::InfoF("[gwheel:surface-ps] wheel[%d] material: %s (hash=0x%016llX)",
+                           i,
+                           name ? name : "(null)",
+                           static_cast<unsigned long long>(hash));
+            }
+        }
     }
 }

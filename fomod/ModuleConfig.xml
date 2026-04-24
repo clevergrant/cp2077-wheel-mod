@@ -22,6 +22,8 @@
           destination="r6\scripts\gwheel\gwheel_mount.reds"/>
     <file source="gwheel_reds\gwheel_events.reds"
           destination="r6\scripts\gwheel\gwheel_events.reds"/>
+    <file source="gwheel_reds\gwheel_surface.reds"
+          destination="r6\scripts\gwheel\gwheel_surface.reds"/>
   </requiredInstallFiles>
 
   <installSteps order="Explicit">
