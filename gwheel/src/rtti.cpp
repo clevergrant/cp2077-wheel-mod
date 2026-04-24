@@ -6,6 +6,7 @@
 #include "plugin.h"
 #include "logging.h"
 #include "rtti_dump.h"
+#include "rtti_offsets.h"
 
 #include <RED4ext/RED4ext.hpp>
 
@@ -203,25 +204,26 @@ namespace gwheel::rtti
             RegisterGlobal(rtti, "GWheel_SetFfbEnabled",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetFfbEnabled>),
                            "Bool", {{ "Bool", "v" }});
-            RegisterGlobal(rtti, "GWheel_SetFfbStrengthPct",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetFfbStrengthPct>),
-                           "Bool", {{ "Int32", "pct" }});
             RegisterGlobal(rtti, "GWheel_SetFfbDebugLogging",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetFfbDebugLogging>),
                            "Bool", {{ "Bool", "v" }});
-
-            RegisterGlobal(rtti, "GWheel_SetOverrideEnabled",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetOverrideEnabled>),
-                           "Bool", {{ "Bool", "v" }});
-            RegisterGlobal(rtti, "GWheel_SetOverrideSensitivity",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetFloat<&config::SetOverrideSensitivity>),
-                           "Bool", {{ "Float", "v" }});
-            RegisterGlobal(rtti, "GWheel_SetOverrideRangeDeg",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetOverrideRangeDeg>),
-                           "Bool", {{ "Int32", "deg" }});
-            RegisterGlobal(rtti, "GWheel_SetOverrideCenteringSpringPct",
-                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetOverrideCenteringSpringPct>),
+            RegisterGlobal(rtti, "GWheel_SetFfbTorquePct",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetFfbTorquePct>),
                            "Bool", {{ "Int32", "pct" }});
+
+            RegisterGlobal(rtti, "GWheel_SetStationaryThresholdMps",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetFloat<&config::SetStationaryThresholdMps>),
+                           "Bool", {{ "Float", "mps" }});
+            RegisterGlobal(rtti, "GWheel_SetYawFeedbackPct",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetYawFeedbackPct>),
+                           "Bool", {{ "Int32", "pct" }});
+            RegisterGlobal(rtti, "GWheel_SetActiveTorqueStrengthPct",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetActiveTorqueStrengthPct>),
+                           "Bool", {{ "Int32", "pct" }});
+
+            RegisterGlobal(rtti, "GWheel_SetSteeringSensitivity",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetFloat<&config::SetSteeringSensitivity>),
+                           "Bool", {{ "Float", "v" }});
 
             RegisterGlobal(rtti, "GWheel_SetInputBinding",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInputBinding),
@@ -236,6 +238,12 @@ namespace gwheel::rtti
 
 
             log::Info("[gwheel] native functions registered for redscript");
+
+            // Resolve vehicle struct offsets dynamically from RTTI — this
+            // sidesteps the "offsets drifted between game patches" problem
+            // by asking the game itself where each field lives. See
+            // rtti_offsets.cpp for what gets resolved.
+            rtti_offsets::Init();
 
             // BISECT: RTTI dump disabled. Still registering natives above;
             // just skipping the full class enumeration pass.

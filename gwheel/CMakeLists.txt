@@ -10,6 +10,7 @@ set(GWHEEL_SOURCES
   src/config.cpp
   src/rtti.cpp
   src/rtti_dump.cpp
+  src/rtti_offsets.cpp
   src/logging.cpp
 )
 
@@ -20,11 +21,13 @@ set(GWHEEL_HEADERS
   src/wheel.h
   src/sources.h
   src/vehicle_hook.h
+  src/vehicle_physics_ext.h
   src/input_bindings.h
   src/kbd_hook.h
   src/config.h
   src/rtti.h
   src/rtti_dump.h
+  src/rtti_offsets.h
   include/gwheel_abi.h
 )
 

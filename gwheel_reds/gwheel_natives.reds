@@ -13,13 +13,15 @@ public static native func GWheel_SetThrottleDeadzonePct(pct: Int32) -> Bool;
 public static native func GWheel_SetBrakeDeadzonePct(pct: Int32) -> Bool;
 
 public static native func GWheel_SetFfbEnabled(v: Bool) -> Bool;
-public static native func GWheel_SetFfbStrengthPct(pct: Int32) -> Bool;
 public static native func GWheel_SetFfbDebugLogging(v: Bool) -> Bool;
+public static native func GWheel_SetFfbTorquePct(pct: Int32) -> Bool;
 
-public static native func GWheel_SetOverrideEnabled(v: Bool) -> Bool;
-public static native func GWheel_SetOverrideSensitivity(v: Float) -> Bool;
-public static native func GWheel_SetOverrideRangeDeg(deg: Int32) -> Bool;
-public static native func GWheel_SetOverrideCenteringSpringPct(pct: Int32) -> Bool;
+// Phase-1 physics FFB: speed-gated self-centering spring with yaw-rate bonus.
+public static native func GWheel_SetStationaryThresholdMps(mps: Float) -> Bool;
+public static native func GWheel_SetYawFeedbackPct(pct: Int32) -> Bool;
+public static native func GWheel_SetActiveTorqueStrengthPct(pct: Int32) -> Bool;
+
+public static native func GWheel_SetSteeringSensitivity(v: Float) -> Bool;
 
 // Per-physical-input action binding. inputId is one of the stable IDs in
 // gwheel/src/input_bindings.h (0 = PaddleLeft, 1 = PaddleRight, etc.).

@@ -19,19 +19,39 @@ namespace gwheel::config
     struct Ffb
     {
         bool    enabled = true;
-        int32_t strengthPct = 80;
-        bool    debugLogging = false;
+        bool    debugLogging = true;
+
+        // Wheel torque, pushed to G HUB via LogiSetPreferredControllerProperties
+        // (overallGain). When "Apply Settings from Game" is checked in G HUB
+        // (the default), G HUB greys out its own Torque slider and expects
+        // the game to drive this value. When unchecked, G HUB ignores our
+        // Set and uses its slider value. 100 = full, 0 = off.
+        int32_t torquePct = 100;
+
+        // Physics-model self-centering. Wheel is free at rest; spring engages
+        // and active torque builds with speed². Shape + cruise speed + spring
+        // baseline are derived per-car from WheeledPhysics. The knobs below
+        // are the user-facing taste scalars layered on top:
+        //
+        // stationaryThresholdMps: below this, all centering forces are off
+        //   so the wheel rests wherever the driver leaves it.
+        // yawFeedbackPct: additive spring-stiffness bonus during rotation,
+        //   normalised against the car's own turnRate. Pure preference.
+        // activeTorqueStrengthPct: 0..100 gain on the directional push-back
+        //   constant force. Peak is shaped (humped sqrt curve over deflection,
+        //   lateral-accel proxy, grip-factor lightening past the yaw limit).
+        float   stationaryThresholdMps  = 0.5f;
+        int32_t yawFeedbackPct          = 50;
+        int32_t activeTorqueStrengthPct = 100;
     };
 
-    struct Override
+    struct Wheel
     {
-        bool  enabled = false;
-        float sensitivity = 1.0f;
-        // CP2077's steering tops out at ~90 degrees of virtual wheel rotation,
-        // so 90 is a better match than a sim-racing 900. Raise via the slider
-        // if you want more travel.
-        int32_t rangeDeg = 90;
-        int32_t centeringSpringPct = 50;
+        // Linear multiplier on raw wheel position before it hits the game's
+        // steer input. 1.0 = identity. Operating range is owned by G HUB
+        // per-profile; the mod reads it at runtime and auto-scales FFB to
+        // match, so there's no mod-side range knob.
+        float steeringSensitivity = 1.0f;
     };
 
     struct PerVehicle
@@ -53,7 +73,7 @@ namespace gwheel::config
         int32_t     version = 2;
         Input       input;
         Ffb         ffb;
-        Override    override_;
+        Wheel       wheel;
         Hello       hello;
         PerVehicle  car        = { 1.0f, 20 };
         PerVehicle  motorcycle = { 1.2f, 10 };
@@ -89,13 +109,14 @@ namespace gwheel::config
     void SetResponseCurve(std::string_view v);
 
     void SetFfbEnabled(bool v);
-    void SetFfbStrengthPct(int32_t v);
     void SetFfbDebugLogging(bool v);
+    void SetFfbTorquePct(int32_t v);
 
-    void SetOverrideEnabled(bool v);
-    void SetOverrideSensitivity(float v);
-    void SetOverrideRangeDeg(int32_t v);
-    void SetOverrideCenteringSpringPct(int32_t v);
+    void SetStationaryThresholdMps(float v);
+    void SetYawFeedbackPct(int32_t v);
+    void SetActiveTorqueStrengthPct(int32_t v);
+
+    void SetSteeringSensitivity(float v);
 
     void SetHelloPlayOnStart(bool v);
 

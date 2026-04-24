@@ -1,6 +1,7 @@
 #include "config.h"
 #include "logging.h"
 #include "input_bindings.h"
+#include "wheel.h"
 
 #include <windows.h>
 
@@ -89,16 +90,16 @@ namespace gwheel::config
             out << "  },\n";
 
             out << "  \"ffb\": {\n";
-            out << "    \"enabled\": "      << (c.ffb.enabled ? "true" : "false")      << ",\n";
-            out << "    \"strengthPct\": "  << c.ffb.strengthPct                       << ",\n";
-            out << "    \"debugLogging\": " << (c.ffb.debugLogging ? "true" : "false") << "\n";
+            out << "    \"enabled\": "                 << (c.ffb.enabled ? "true" : "false")           << ",\n";
+            out << "    \"debugLogging\": "            << (c.ffb.debugLogging ? "true" : "false")      << ",\n";
+            out << "    \"torquePct\": "               << c.ffb.torquePct                              << ",\n";
+            out << "    \"stationaryThresholdMps\": "  << c.ffb.stationaryThresholdMps                 << ",\n";
+            out << "    \"yawFeedbackPct\": "          << c.ffb.yawFeedbackPct                         << ",\n";
+            out << "    \"activeTorqueStrengthPct\": " << c.ffb.activeTorqueStrengthPct                << "\n";
             out << "  },\n";
 
-            out << "  \"override\": {\n";
-            out << "    \"enabled\": "            << (c.override_.enabled ? "true" : "false") << ",\n";
-            out << "    \"sensitivity\": "        << c.override_.sensitivity                  << ",\n";
-            out << "    \"rangeDeg\": "           << c.override_.rangeDeg                     << ",\n";
-            out << "    \"centeringSpringPct\": " << c.override_.centeringSpringPct           << "\n";
+            out << "  \"wheel\": {\n";
+            out << "    \"steeringSensitivity\": " << c.wheel.steeringSensitivity << "\n";
             out << "  },\n";
 
             out << "  \"hello\": {\n";
@@ -229,13 +230,13 @@ namespace gwheel::config
             ExtractString(text, "input",    "responseCurve",          c.input.responseCurve);
 
             ExtractBool  (text, "ffb",      "enabled",                c.ffb.enabled);
-            ExtractInt   (text, "ffb",      "strengthPct",            c.ffb.strengthPct);
             ExtractBool  (text, "ffb",      "debugLogging",           c.ffb.debugLogging);
+            ExtractInt   (text, "ffb",      "torquePct",              c.ffb.torquePct);
+            ExtractFloat (text, "ffb",      "stationaryThresholdMps", c.ffb.stationaryThresholdMps);
+            ExtractInt   (text, "ffb",      "yawFeedbackPct",         c.ffb.yawFeedbackPct);
+            ExtractInt   (text, "ffb",      "activeTorqueStrengthPct", c.ffb.activeTorqueStrengthPct);
 
-            ExtractBool  (text, "override", "enabled",                c.override_.enabled);
-            ExtractFloat (text, "override", "sensitivity",            c.override_.sensitivity);
-            ExtractInt   (text, "override", "rangeDeg",               c.override_.rangeDeg);
-            ExtractInt   (text, "override", "centeringSpringPct",     c.override_.centeringSpringPct);
+            ExtractFloat (text, "wheel",    "steeringSensitivity",    c.wheel.steeringSensitivity);
 
             ExtractBool  (text, "hello",    "playOnStart",            c.hello.playOnStart);
 
@@ -277,6 +278,7 @@ namespace gwheel::config
             // Anything that must take effect immediately when config changes.
             log::SetDebugEnabled(c.ffb.debugLogging);
             input_bindings::ReplaceAll(c.bindings);
+            wheel::SetGlobalStrength(std::clamp(c.ffb.torquePct, 0, 100) / 100.f);
         }
 
         void Publish(const Config& next)
@@ -326,11 +328,11 @@ namespace gwheel::config
             try
             {
                 Parse(buf.str(), c);
-                log::InfoF("[gwheel] config loaded (version=%d, input.enabled=%s, ffb.enabled=%s, override.enabled=%s)",
+                log::InfoF("[gwheel] config loaded (version=%d, input.enabled=%s, ffb.enabled=%s, ffb.debugLogging=%s)",
                            c.version,
                            c.input.enabled ? "true" : "false",
                            c.ffb.enabled ? "true" : "false",
-                           c.override_.enabled ? "true" : "false");
+                           c.ffb.debugLogging ? "true" : "false");
             }
             catch (...)
             {
@@ -365,13 +367,14 @@ namespace gwheel::config
     }
 
     void SetFfbEnabled(bool v)              { Mutate([&](Config& c){ c.ffb.enabled = v; }); }
-    void SetFfbStrengthPct(int32_t v)       { Mutate([&](Config& c){ c.ffb.strengthPct = std::clamp(v, 0, 100); }); }
     void SetFfbDebugLogging(bool v)         { Mutate([&](Config& c){ c.ffb.debugLogging = v; }); }
+    void SetFfbTorquePct(int32_t v)         { Mutate([&](Config& c){ c.ffb.torquePct = std::clamp(v, 0, 100); }); }
 
-    void SetOverrideEnabled(bool v)         { Mutate([&](Config& c){ c.override_.enabled = v; }); }
-    void SetOverrideSensitivity(float v)    { Mutate([&](Config& c){ c.override_.sensitivity = std::clamp(v, 0.25f, 2.0f); }); }
-    void SetOverrideRangeDeg(int32_t v)     { Mutate([&](Config& c){ c.override_.rangeDeg = std::clamp(v, 40, 900); }); }
-    void SetOverrideCenteringSpringPct(int32_t v) { Mutate([&](Config& c){ c.override_.centeringSpringPct = std::clamp(v, 0, 100); }); }
+    void SetStationaryThresholdMps(float v) { Mutate([&](Config& c){ c.ffb.stationaryThresholdMps = std::clamp(v, 0.f, 10.f); }); }
+    void SetYawFeedbackPct(int32_t v)       { Mutate([&](Config& c){ c.ffb.yawFeedbackPct = std::clamp(v, 0, 100); }); }
+    void SetActiveTorqueStrengthPct(int32_t v) { Mutate([&](Config& c){ c.ffb.activeTorqueStrengthPct = std::clamp(v, 0, 100); }); }
+
+    void SetSteeringSensitivity(float v)    { Mutate([&](Config& c){ c.wheel.steeringSensitivity = std::clamp(v, 0.25f, 2.0f); }); }
 
     void SetHelloPlayOnStart(bool v)        { Mutate([&](Config& c){ c.hello.playOnStart = v; }); }
 

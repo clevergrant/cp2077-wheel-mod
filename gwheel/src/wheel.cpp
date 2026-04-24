@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -59,20 +60,20 @@ namespace gwheel::wheel
             std::atomic<uint32_t> initAttempts{0};
             std::atomic<bool>     helloFired{false};
 
-            // G HUB's operating range captured at bind time, so we can hand
-            // the wheel back cleanly when the override toggle flips off.
-            std::atomic<int>      originalRangeDeg{0};
-            std::atomic<bool>     haveOriginalRange{false};
-
-            // Last values pushed to the SDK by ApplyOverrides. -1 means "not
-            // yet pushed". Settings are pause-menu-only so races here are
-            // benign; atomics keep it simple without needing a mutex.
-            std::atomic<int>      lastRangeDeg{-1};
-            std::atomic<int>      lastSpringPct{-1};
-            std::atomic<bool>     lastOverrideEnabled{false};
         };
 
         State& S() { static State s; return s; }
+
+        // G HUB owns the operating range per-profile. The mod honors it:
+        // once per second we read the SDK's current range and cache it
+        // into s_ghubRangeDeg, which UpdateCenteringSpring consults to
+        // scale FFB magnitude inversely with wheel rotation (so a 900-deg
+        // wheel isn't weighed down by SAT meant for a tight 180).
+        //
+        // Default starting value is a safe 540 — most G HUB profiles land
+        // in this range, and the value gets overwritten with the real
+        // reading at bind time plus refreshed every second thereafter.
+        std::atomic<int> s_ghubRangeDeg{540};
 
         // Pick the first LOGI_DEVICE_TYPE_WHEEL index that reports connected.
         int FindWheelIndex()
@@ -330,6 +331,11 @@ namespace gwheel::wheel
                        snap.hasFFB ? "yes" : "no",
                        snap.operatingRangeDeg);
 
+            // Seed the cached G HUB range from the bind-time readback so
+            // FFB scaling has a real value before the 1 Hz sampler fires.
+            if (snap.operatingRangeDeg > 0)
+                s_ghubRangeDeg.store(snap.operatingRangeDeg, std::memory_order_release);
+
             st.hasFFB.store(snap.hasFFB, std::memory_order_release);
             st.ready.store(true, std::memory_order_release);
 
@@ -347,105 +353,52 @@ namespace gwheel::wheel
             return true;
         }
 
-        // Range limits we expose to the user. G-series wheels (G29/G920/G923)
-        // support hardware ranges down to ~40 deg and up to 900 deg.
-        constexpr int kMinRangeDeg = 40;
-        constexpr int kMaxRangeDeg = 900;
+        // Torque is applied as a per-effect magnitude multiplier via
+        // wheel::SetGlobalStrength (wired from config::ApplyDerived).
+        // The Logi Properties API is broken on recent G HUB versions —
+        // LogiSetPreferredControllerProperties consistently returns
+        // FAILED — so we can't use the "proper" route of pushing
+        // overallGain to G HUB and letting G HUB scale the output at
+        // the driver level. The per-effect multiplier is reliable and
+        // composes correctly with G HUB's own TRUEFORCE Torque slider.
 
-        // Push config::override_ changes down to the Logitech SDK. Called
-        // once per pump tick after the wheel is bound.
-        //
-        // Strictly edge-triggered. When override is off and has never been
-        // turned on this session, this function does nothing at all — G HUB
-        // stays in complete control of the wheel. SDK writes only happen on:
-        //   - off -> on edge (apply range + spring, capture G HUB's pre-
-        //     override range so we can restore later)
-        //   - on -> off edge (stop spring, restore captured range)
-        //   - config value changed while on (push the delta)
-        //
-        // Division of labor:
-        //   - hardware operating range: LogiSetOperatingRange / restored from
-        //     the value captured at first off->on edge this session
-        //   - centering spring: continuous LogiPlaySpringForce / Stop
-        //   - sensitivity: NOT applied here; vehicle_hook reads it per-tick
-        //     and multiplies the normalized steer before writing the input.
-        void ApplyOverrides(int idx)
+        void RefreshGHubRange(int idx)
         {
-            auto& st = S();
-            const auto cfg = config::Current();
-            const bool enabled = cfg.override_.enabled;
-            const int  range   = std::clamp(cfg.override_.rangeDeg, kMinRangeDeg, kMaxRangeDeg);
-            const int  spring  = std::clamp(cfg.override_.centeringSpringPct, 0, 100);
+            // Pump runs at ~250 Hz; sample every 1s (≈250 ticks).
+            static uint64_t s_pumpTicks = 0;
+            if ((++s_pumpTicks % 250) != 0) return;
 
-            const bool wasEnabled = st.lastOverrideEnabled.load(std::memory_order_relaxed);
-            const int  lastRange  = st.lastRangeDeg.load(std::memory_order_relaxed);
-            const int  lastSpring = st.lastSpringPct.load(std::memory_order_relaxed);
-            const bool edgeOn     = enabled && !wasEnabled;
-            const bool edgeOff    = !enabled && wasEnabled;
+            int actual = 0;
+            if (!LogiGetOperatingRange(idx, actual) || actual <= 0) return;
 
-            if (enabled)
+            const int prev = s_ghubRangeDeg.exchange(actual, std::memory_order_acq_rel);
+            if (prev != actual)
             {
-                if (edgeOn)
-                {
-                    // Capture G HUB's current range so we can restore it on
-                    // edgeOff. We do this here (not at bind) so that a user
-                    // who never touches override never has us read or write
-                    // SDK range state at all.
-                    int current = 0;
-                    if (LogiGetOperatingRange(idx, current) && current > 0)
-                    {
-                        st.originalRangeDeg.store(current, std::memory_order_release);
-                        st.haveOriginalRange.store(true, std::memory_order_release);
-                        log::InfoF("[gwheel] override ON: captured pre-override range = %d deg",
-                                   current);
-                    }
-                    else
-                    {
-                        log::Warn("[gwheel] override ON: LogiGetOperatingRange failed; "
-                                  "will not be able to restore G HUB's range on override-off");
-                    }
-                }
-
-                if (edgeOn || range != lastRange)
-                {
-                    const bool ok = LogiSetOperatingRange(idx, range);
-                    log::InfoF("[gwheel] override: LogiSetOperatingRange(%d deg) -> %s",
-                               range, ok ? "ok" : "FAILED");
-                    st.lastRangeDeg.store(range, std::memory_order_relaxed);
-                }
-                if (edgeOn || spring != lastSpring)
-                {
-                    // offset=0 (centered), saturation=100, coefficient=spring.
-                    const bool ok = LogiPlaySpringForce(idx, 0, 100, spring);
-                    log::InfoF("[gwheel] override: centering spring %d%% -> %s",
-                               spring, ok ? "ok" : "FAILED");
-                    st.lastSpringPct.store(spring, std::memory_order_relaxed);
-                }
+                log::InfoF("[gwheel] operating range (G HUB): %d -> %d deg (FFB auto-scaling to match)",
+                           prev, actual);
             }
-            else if (edgeOff)
-            {
-                LogiStopSpringForce(idx);
-                log::Info("[gwheel] override disabled: centering spring stopped");
+        }
+    }
 
-                const int  orig = st.originalRangeDeg.load(std::memory_order_acquire);
-                const bool have = st.haveOriginalRange.load(std::memory_order_acquire);
-                if (have && orig > 0)
-                {
-                    const bool ok = LogiSetOperatingRange(idx, orig);
-                    log::InfoF("[gwheel] override disabled: restoring pre-override range=%d deg -> %s",
-                               orig, ok ? "ok" : "FAILED");
-                }
-                else
-                {
-                    log::Info("[gwheel] override disabled: no captured range to restore");
-                }
-                st.lastRangeDeg.store(-1, std::memory_order_relaxed);
-                st.lastSpringPct.store(-1, std::memory_order_relaxed);
-            }
-            // else: override is off and has never been on this session — do
-            // nothing. G HUB remains fully in charge of the wheel.
+    // Edge-triggered state for UpdateCenteringSpring, hoisted out of the
+    // function so the pump watchdog can reset it when the game pauses and
+    // the vehicle detour stops firing. -1 / INT_MIN / false = not playing.
+    namespace centering_state
+    {
+        inline std::atomic<int>  s_lastCoefPct{-1};
+        inline std::atomic<int>  s_lastConstPct{INT_MIN};
+        inline std::atomic<int>  s_lastDamperPct{-1};
+        inline std::atomic<int>  s_lastBumpyPct{-1};
+        inline std::atomic<bool> s_airborneOn{false};
+        inline std::atomic<uint64_t> s_lastCallTickMs{0};
 
-            st.lastOverrideEnabled.store(enabled, std::memory_order_relaxed);
+        inline void Reset()
+        {
+            s_lastCoefPct.store(-1, std::memory_order_release);
+            s_lastConstPct.store(INT_MIN, std::memory_order_release);
+            s_lastDamperPct.store(-1, std::memory_order_release);
+            s_lastBumpyPct.store(-1, std::memory_order_release);
+            s_airborneOn.store(false, std::memory_order_release);
         }
     }
 
@@ -471,16 +424,12 @@ namespace gwheel::wheel
                 LogiStopSpringForce(idx);
                 LogiStopDamperForce(idx);
                 LogiStopConstantForce(idx);
+                LogiStopSurfaceEffect(idx);
+                LogiStopCarAirborne(idx);
 
-                // Return the wheel to Logitech's out-of-box hardware range
-                // (900 deg) on shutdown. The SDK's Properties API for
-                // restoring G HUB's exact values isn't functional with modern
-                // G HUB - LogiGet/SetPreferredControllerProperties both
-                // return false - so 900 is the pragmatic "vanilla" state.
-                // Runs unconditionally so crashes-to-desktop mid-override
-                // don't leave the wheel stuck at a narrow range.
-                const bool ok = LogiSetOperatingRange(idx, 900);
-                log::InfoF("[gwheel] shutdown: LogiSetOperatingRange(900) -> %s", ok ? "ok" : "FAILED");
+                // Operating range is G HUB's to manage; we don't touch it
+                // on shutdown. G HUB will keep enforcing whatever its
+                // profile says.
             }
             LogiSteeringShutdown();
             log::Info("[gwheel] LogiSteeringShutdown ok");
@@ -526,7 +475,36 @@ namespace gwheel::wheel
             return;
         }
 
-        ApplyOverrides(idx);
+        RefreshGHubRange(idx);
+
+        // Pause / unmount watchdog. UpdateCenteringSpring heartbeats each
+        // time the vehicle detour fires. When the game pauses, the detour
+        // stops firing — but already-playing effects (spring, road surface,
+        // etc.) keep running until something stops them. If no heartbeat
+        // in 200 ms, tear everything down. Re-arms automatically when the
+        // detour fires again.
+        {
+            const uint64_t last = centering_state::s_lastCallTickMs.load(std::memory_order_acquire);
+            static std::atomic<bool> s_gracefullyTornDown{false};
+            if (last > 0)
+            {
+                const uint64_t now = GetTickCount64();
+                const bool stale  = (now - last) > 200;
+                const bool wasTD  = s_gracefullyTornDown.load(std::memory_order_acquire);
+                if (stale && !wasTD)
+                {
+                    StopAll();
+                    centering_state::Reset();
+                    s_gracefullyTornDown.store(true, std::memory_order_release);
+                    log::Info("[gwheel] FFB effects released (gameplay halted — pause / unmount)");
+                }
+                else if (!stale && wasTD)
+                {
+                    s_gracefullyTornDown.store(false, std::memory_order_release);
+                    log::Info("[gwheel] FFB effects re-arming (gameplay resumed)");
+                }
+            }
+        }
 
         const DIJOYSTATE2* raw = LogiGetState(idx);
         if (!raw) return;
@@ -563,16 +541,15 @@ namespace gwheel::wheel
         int Scale100(float v)
         {
             const float mul = std::clamp(S().globalStrength.load(std::memory_order_relaxed), 0.f, 1.f);
-            const float scaled = std::clamp(v * mul, -1.f, 1.f);
-            const int pct = static_cast<int>(std::lround(scaled * 100.f));
-            return std::clamp(pct, -100, 100);
+            return std::clamp(static_cast<int>(std::lround(std::clamp(v * mul, -1.f, 1.f) * 100.f)),
+                              -100, 100);
         }
 
         int ScaleUnsigned100(float v)
         {
             const float mul = std::clamp(S().globalStrength.load(std::memory_order_relaxed), 0.f, 1.f);
-            const float scaled = std::clamp(v * mul, 0.f, 1.f);
-            return std::clamp(static_cast<int>(std::lround(scaled * 100.f)), 0, 100);
+            return std::clamp(static_cast<int>(std::lround(std::clamp(v * mul, 0.f, 1.f) * 100.f)),
+                              0, 100);
         }
     }
 
@@ -639,6 +616,43 @@ namespace gwheel::wheel
         S().globalStrength.store(std::clamp(mul, 0.f, 1.f), std::memory_order_relaxed);
     }
 
+    void PlayRoadSurface(float magnitude, int periodMs)
+    {
+        auto& st = S();
+        if (!st.ready.load() || !st.hasFFB.load()) return;
+        const int idx = st.index.load(std::memory_order_acquire);
+        const int pct = ScaleUnsigned100(magnitude);
+        if (!LogiPlaySurfaceEffect(idx, LOGI_PERIODICTYPE_SINE, pct, periodMs))
+            log::DebugF("[gwheel] LogiPlaySurfaceEffect(SINE, %d, %dms) returned false", pct, periodMs);
+        else if (log::DebugEnabled())
+            log::DebugF("[gwheel] surface=%d%% @ %dms", pct, periodMs);
+    }
+
+    void StopRoadSurface()
+    {
+        auto& st = S();
+        const int idx = st.index.load(std::memory_order_acquire);
+        if (idx >= 0) LogiStopSurfaceEffect(idx);
+    }
+
+    void PlayCarAirborne()
+    {
+        auto& st = S();
+        if (!st.ready.load() || !st.hasFFB.load()) return;
+        const int idx = st.index.load(std::memory_order_acquire);
+        if (!LogiPlayCarAirborne(idx))
+            log::Debug("[gwheel] LogiPlayCarAirborne returned false");
+        else if (log::DebugEnabled())
+            log::Debug("[gwheel] airborne ON");
+    }
+
+    void StopCarAirborne()
+    {
+        auto& st = S();
+        const int idx = st.index.load(std::memory_order_acquire);
+        if (idx >= 0) LogiStopCarAirborne(idx);
+    }
+
     void StopAll()
     {
         auto& st = S();
@@ -647,5 +661,270 @@ namespace gwheel::wheel
         LogiStopConstantForce(idx);
         LogiStopDamperForce(idx);
         LogiStopSpringForce(idx);
+        LogiStopSurfaceEffect(idx);
+        LogiStopCarAirborne(idx);
+    }
+
+    void UpdateCenteringSpring(float absSpeedMps,
+                               float angVelMagRad,
+                               float steer,
+                               float throttle,
+                               float brake,
+                               bool  isReversing,
+                               bool  isOnGround,
+                               bool  enabled,
+                               float stationaryMps,
+                               float cruiseMps,
+                               float centeringBaseline,
+                               int   yawFeedbackPct,
+                               float yawRef,
+                               int   activeTorqueStrengthPct,
+                               bool  debugLog)
+    {
+        using namespace centering_state;
+
+        // Heartbeat for the pump-thread pause watchdog. If this tick count
+        // stops advancing (vehicle detour stopped firing — pause, unmount),
+        // the pump will tear down all effects after a short grace period.
+        s_lastCallTickMs.store(GetTickCount64(), std::memory_order_release);
+
+        // Reverse is a physical constant: when a car backs up, pneumatic
+        // trail flips sign and SAT drops to roughly 30-50% of forward. Not
+        // car-dependent and not taste — same ratio for every vehicle.
+        constexpr float kReverseMul = 0.4f;
+
+        // Operating-range compensation. A 900-deg wheel turns 5x further
+        // than a 180-deg wheel for the same SAT output, so the per-degree
+        // force feels overwhelming. Scale all FFB inversely with range,
+        // anchored on 180-deg = 1.0. Range is read from G HUB (cached by
+        // the pump thread); if the user changes profiles mid-session we
+        // pick it up within a second. Clamped to avoid zero and absurd
+        // boosts at tight ranges.
+        const int ghubRange = std::clamp(s_ghubRangeDeg.load(std::memory_order_acquire),
+                                         40, 900);
+        const float rangeScale = std::clamp(180.f / static_cast<float>(ghubRange),
+                                            0.3f, 1.5f);
+
+        auto& st = S();
+        if (!st.ready.load() || !st.hasFFB.load()) return;
+
+        // Helper lambdas so the early-return and airborne paths can tear
+        // down the same set of effects without code duplication.
+        auto stopContactEffects = [&]() {
+            const int prevS = s_lastCoefPct.exchange(-1, std::memory_order_acq_rel);
+            if (prevS >= 0) StopSpring();
+            const int prevC = s_lastConstPct.exchange(INT_MIN, std::memory_order_acq_rel);
+            if (prevC != INT_MIN) StopConstant();
+            const int prevD = s_lastDamperPct.exchange(-1, std::memory_order_acq_rel);
+            if (prevD >= 0) StopDamper();
+            const int prevB = s_lastBumpyPct.exchange(-1, std::memory_order_acq_rel);
+            if (prevB >= 0) StopRoadSurface();
+        };
+
+        // Airborne: all four wheels off the ground. Real SAT drops to zero
+        // (no tire load). Play the SDK's dedicated airborne effect (a brief
+        // high-frequency shake) and tear down all contact forces so the
+        // wheel doesn't feel weirdly heavy while the car is flying.
+        if (enabled && !isOnGround)
+        {
+            stopContactEffects();
+            if (!s_airborneOn.exchange(true, std::memory_order_acq_rel))
+            {
+                PlayCarAirborne();
+                if (debugLog)
+                    log::DebugF("[gwheel:ffb] airborne BEGIN (speed=%.2f)", absSpeedMps);
+            }
+            return;
+        }
+
+        // Grounded again: stop airborne effect if it was on.
+        if (s_airborneOn.exchange(false, std::memory_order_acq_rel))
+        {
+            StopCarAirborne();
+            if (debugLog)
+                log::DebugF("[gwheel:ffb] airborne END (speed=%.2f)", absSpeedMps);
+        }
+
+        const bool moving = absSpeedMps > stationaryMps;
+
+        if (!enabled || !moving)
+        {
+            const int prevS = s_lastCoefPct.load(std::memory_order_acquire);
+            const int prevC = s_lastConstPct.load(std::memory_order_acquire);
+            const int prevD = s_lastDamperPct.load(std::memory_order_acquire);
+            const int prevB = s_lastBumpyPct.load(std::memory_order_acquire);
+            stopContactEffects();
+
+            if (debugLog && (prevS >= 0 || prevC != INT_MIN || prevD >= 0 || prevB >= 0))
+                log::DebugF("[gwheel:ffb] centering OFF (speed=%.2f reversing=%d enabled=%d) prevS=%d%% prevC=%d%% prevD=%d%% prevB=%d%%",
+                            absSpeedMps, isReversing ? 1 : 0, enabled ? 1 : 0, prevS, prevC, prevD, prevB);
+            return;
+        }
+
+        // --- Speed component: v² normalized to per-car cruise ------------
+        // Used by the spring (for static heaviness) and the damper (to scale
+        // viscous feel with speed). Active torque uses loadFactor below,
+        // which is a more physical lateral-accel proxy.
+        const float cruiseSafe = std::max(1.f, cruiseMps);
+        const float vRatio     = absSpeedMps / cruiseSafe;
+        const float speedSq    = std::clamp(vRatio * vRatio, 0.f, 2.25f);
+
+        // --- Yaw / grip components --------------------------------------
+        // yawRatio < 1  — below the car's turnRate, full SAT
+        // yawRatio == 1 — at the yaw limit (peak grip, rails)
+        // yawRatio > 1  — past the limit (sliding); SAT decays exponentially
+        const float yawRefSafe = std::max(0.01f, yawRef);
+        const float yawMag     = std::fabs(angVelMagRad);
+        const float yawRatio   = yawMag / yawRefSafe;
+        const float yawRamp    = std::clamp(yawRatio, 0.f, 1.f);
+        const float gripFactor = yawRatio < 1.f
+                               ? 1.f
+                               : std::clamp(std::exp(-2.f * (yawRatio - 1.f)), 0.f, 1.f);
+
+        // --- Lateral-acceleration proxy for active torque ----------------
+        // |yawRate × v| is proportional to real lateral acceleration
+        // (m/s² of centripetal force in the tire's frame). Normalize by
+        // the car's steady-state limit yawRef×cruise so 1.0 = peak grip;
+        // allow 1.5 for transient overshoot (you're loading the tire
+        // harder than it can sustain, about to slide).
+        //
+        // This naturally embeds v² (steady-state yaw scales with v, so
+        // yaw×v ≈ v² × tan(steer)/wheelbase) — no separate v² term needed
+        // on the active torque.
+        const float loadFactor = std::clamp(
+            (yawMag * absSpeedMps) / (yawRefSafe * cruiseSafe),
+            0.f, 1.5f);
+
+        // --- Fore-aft load transfer --------------------------------------
+        // Braking loads the fronts (more normal force → more lateral grip
+        // → more SAT). Throttle slightly unloads the fronts. Coefficients
+        // are rough but capture the directional feel.
+        const float weightMul = std::clamp(1.f + 0.3f * brake - 0.05f * throttle,
+                                           0.5f, 1.5f);
+
+        const float reverseMul = isReversing ? kReverseMul : 1.f;
+
+        // --- Passive spring: stiffness modulated by speed² + yaw bonus,
+        // entire sum multiplied by gripFactor so a slide/drift drops the
+        // spring along with every other SAT-derived force. Real tires
+        // produce little lateral force past peak slip, so the wheel
+        // should go light — not heavier — during a drift.
+        const float baseline  = std::clamp(centeringBaseline, 0.f, 1.f);
+        float coef = (baseline * speedSq
+                    + yawRamp * (static_cast<float>(yawFeedbackPct) / 100.f))
+                   * gripFactor;
+        coef *= reverseMul * rangeScale;
+        coef = std::clamp(coef, 0.f, 1.f);
+
+        const int coefPct = std::clamp(static_cast<int>(std::lround(coef * 100.f)), 0, 100);
+        const int prevS   = s_lastCoefPct.load(std::memory_order_acquire);
+        if (prevS < 0 || std::abs(coefPct - prevS) >= 5)
+        {
+            PlaySpring(coef);
+            s_lastCoefPct.store(coefPct, std::memory_order_release);
+        }
+
+        // --- Active alignment torque: humped over deflection, driven by load
+        // Shape: sqrt(|steer|) × (1 − steer⁴). Peak ~0.67 at |steer|=0.54.
+        // Strong force at small deflections (sqrt), rolls off toward full
+        // lock (^4 term falls fast past 60%) — tires at the slip limit
+        // produce less SAT, not more.
+        const float steerMag   = std::fabs(steer);
+        const float signSteer  = (steer > 0.f) ? 1.f : (steer < 0.f ? -1.f : 0.f);
+        const float steerSq    = steerMag * steerMag;
+        const float steerShape = std::sqrt(steerMag) * (1.f - steerSq * steerSq);
+
+        float constForce = -signSteer * steerShape * loadFactor * gripFactor * weightMul
+                         * (static_cast<float>(activeTorqueStrengthPct) / 100.f);
+        constForce *= reverseMul * rangeScale;
+        constForce = std::clamp(constForce, -1.f, 1.f);
+
+        const int constPct = std::clamp(static_cast<int>(std::lround(constForce * 100.f)), -100, 100);
+        const int prevC    = s_lastConstPct.load(std::memory_order_acquire);
+        if (prevC == INT_MIN || std::abs(constPct - prevC) >= 5)
+        {
+            if (constPct == 0 && prevC != INT_MIN)
+            {
+                StopConstant();
+            }
+            else
+            {
+                PlayConstant(constForce);
+            }
+            s_lastConstPct.store(constPct, std::memory_order_release);
+        }
+
+        // --- Damper: viscous resistance scaling with speed² -------------
+        // Real steering has friction + tire/rack damping that grows with
+        // load. At rest we want zero damper (wheel turns freely); at cruise
+        // we want enough to kill return-to-center oscillation and give the
+        // wheel "weight" in the driver's hands.
+        // Damper also respects gripFactor — rack + tire damping comes from
+        // loaded tires; in a drift the tires aren't loaded, the wheel
+        // should flick easily against countersteer.
+        const float damperCoef = std::clamp(speedSq * 0.4f * gripFactor * reverseMul * rangeScale,
+                                            0.f, 0.5f);
+        const int damperPct    = std::clamp(static_cast<int>(std::lround(damperCoef * 100.f)), 0, 100);
+        const int prevD        = s_lastDamperPct.load(std::memory_order_acquire);
+        if (prevD < 0 || std::abs(damperPct - prevD) >= 5)
+        {
+            if (damperPct == 0 && prevD > 0)
+            {
+                StopDamper();
+            }
+            else
+            {
+                PlayDamper(damperCoef);
+            }
+            s_lastDamperPct.store(damperPct, std::memory_order_release);
+        }
+
+        // --- Road surface: always-on tarmac hum -------------------------
+        // Real pavement is never perfectly smooth — a small background
+        // vibration lifts the wheel out of the "dead" silent-between-
+        // forces feel. We use LogiPlaySurfaceEffect with a SINE wave at
+        // ~5.5 Hz (180 ms period) rather than the SDK's canned
+        // LogiPlayBumpyRoadEffect, which is tuned for rally games and
+        // feels like a machine gun at any noticeable magnitude.
+        //
+        // Peak magnitude caps at 6% — enough to hear the wheel "breathing"
+        // at cruise without being intrusive. Gate below speedSq=0.15 so
+        // parking-lot crawls stay silent.
+        //
+        // Per-surface variants (dirt, gravel, ice, off-road) would key off
+        // the game's material-under-each-wheel data, which we don't probe
+        // yet — that's a future pass.
+        constexpr int   kSurfacePeriodMs = 180;
+        constexpr float kSurfacePeakMag  = 0.06f;
+        constexpr float kSurfaceGate     = 0.15f;
+        const float bumpyMag = std::clamp((speedSq - kSurfaceGate) * 0.08f * rangeScale,
+                                          0.f, kSurfacePeakMag);
+        const int bumpyPct   = std::clamp(static_cast<int>(std::lround(bumpyMag * 100.f)), 0, 100);
+        const int prevB      = s_lastBumpyPct.load(std::memory_order_acquire);
+        if (prevB < 0 || std::abs(bumpyPct - prevB) >= 1)
+        {
+            if (bumpyPct == 0 && prevB > 0)
+            {
+                StopRoadSurface();
+            }
+            else if (bumpyPct > 0)
+            {
+                PlayRoadSurface(bumpyMag, kSurfacePeriodMs);
+            }
+            s_lastBumpyPct.store(bumpyPct, std::memory_order_release);
+        }
+
+        if (debugLog && (prevS < 0 || std::abs(coefPct - prevS) >= 5
+                      || prevC == INT_MIN || std::abs(constPct - prevC) >= 5
+                      || prevD < 0 || std::abs(damperPct - prevD) >= 5
+                      || prevB < 0 || std::abs(bumpyPct - prevB) >= 5))
+        {
+            log::DebugF("[gwheel:ffb] PUSH speed=%.2f yaw=%.2f steer=%+.2f br=%.2f th=%.2f rev=%d "
+                        "cruise=%.1f base=%.2f vSq=%.2f yRatio=%.2f grip=%.2f load=%.2f weight=%.2f "
+                        "spring=%d%% active=%+d%% damper=%d%% bumpy=%d%%",
+                        absSpeedMps, angVelMagRad, steer, brake, throttle, isReversing ? 1 : 0,
+                        cruiseMps, centeringBaseline, speedSq, yawRatio, gripFactor, loadFactor, weightMul,
+                        coefPct, constPct, damperPct, bumpyPct);
+        }
     }
 }

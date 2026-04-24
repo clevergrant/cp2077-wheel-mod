@@ -43,6 +43,73 @@ namespace gwheel::wheel
     void StopDamper();
     void PlaySpring(float coefficient);
     void StopSpring();
-    void SetGlobalStrength(float mul);   // 0..1 multiplier applied to all effects
+    void PlayRoadSurface(float magnitude, int periodMs);  // magnitude 0..1, period in ms (SINE)
+    void StopRoadSurface();
+    void PlayCarAirborne();
+    void StopCarAirborne();
+    void SetGlobalStrength(float mul);   // 0..1 multiplier applied to all effect magnitudes
     void StopAll();
+
+    // Physics-model self-centering FFB. Three layered forces, edge-triggered
+    // and safe to call every tick:
+    //
+    //   (1) Passive spring (PlaySpringForce) — stiffness scales with speed²
+    //       and yaw rate. Provides "heavier wheel" feel at speed; zero when
+    //       parked so the wheel rests where the driver leaves it.
+    //
+    //   (2) Active alignment torque (PlayConstantForce) — directional push
+    //       driven by a lateral-acceleration proxy |yawRate × v|, shaped by
+    //       a humped curve over steer deflection (peak near 54%, falls to
+    //       zero at full lock — tires past peak slip lose SAT), multiplied
+    //       by an exponential grip factor that lightens the wheel as the
+    //       car slides past its native turnRate, and weighted by fore-aft
+    //       load transfer (braking loads the fronts → more SAT).
+    //
+    //   (3) Damper (PlayDamperForce) — viscous resistance that kills
+    //       on-center oscillation. Scales with speed² so parked wheel is
+    //       free, highway wheel has real weight behind motion.
+    //
+    // Per-car inputs (caller derives from WheeledPhysics, falls back to
+    // hardcoded defaults for vehicles whose physics we can't read):
+    //   cruiseMps         — speed at which v² saturates (derived from
+    //                       wheelbase)
+    //   centeringBaseline — per-car peak spring coef at cruise (derived
+    //                       from wheelbase)
+    //   yawRef            — rad/s yaw threshold (per-car turnRate)
+    //
+    // Formulas:
+    //   speedSq     = clamp((absSpeed / cruiseMps)², 0, 2.25)
+    //   yawRatio    = |angVelMag| / yawRef
+    //   yawRamp     = clamp(yawRatio, 0, 1)
+    //   gripFactor  = yawRatio < 1 ? 1 : exp(-2 × (yawRatio − 1))
+    //                     (smoothly decays past the yaw limit; ~0.14 at 2×)
+    //   loadFactor  = clamp(|angVelMag × absSpeed| / (yawRef × cruiseMps),
+    //                       0, 1.5)
+    //                     (lateral-accel proxy: 1.0 at steady-state limit,
+    //                      up to 1.5 for transient overshoot)
+    //   weight      = 1 + 0.3 × brake − 0.05 × throttle
+    //                     (fore-aft load transfer)
+    //   steerShape  = sqrt(|steer|) × (1 − steer⁴)   (humped, peak ~0.54)
+    //   reverseMul  = isReversing ? 0.4 : 1   (physical constant, not tunable)
+    //
+    //   springCoef  = clamp(centeringBaseline × speedSq × gripFactor
+    //                      + yawRamp × yawFeedbackPct/100, 0, 1) × reverseMul
+    //   activeForce = −sign(steer) × steerShape × loadFactor × gripFactor
+    //                 × weight × activeTorqueStrengthPct/100 × reverseMul
+    //   damperCoef  = clamp(speedSq × 0.4, 0, 0.5)
+    void UpdateCenteringSpring(float absSpeedMps,
+                               float angVelMagRad,
+                               float steer,
+                               float throttle,
+                               float brake,
+                               bool  isReversing,
+                               bool  isOnGround,
+                               bool  enabled,
+                               float stationaryMps,
+                               float cruiseMps,
+                               float centeringBaseline,
+                               int   yawFeedbackPct,
+                               float yawRef,
+                               int   activeTorqueStrengthPct,
+                               bool  debugLog);
 }

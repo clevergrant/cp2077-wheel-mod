@@ -48,54 +48,64 @@ public class GWheelSettings extends IScriptable {
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.displayName", "Enable force feedback")
-  @runtimeProperty("ModSettings.description", "Plugin-driven effects only (collision, surface texture). Centering spring stays with G HUB.")
+  @runtimeProperty("ModSettings.description", "Master toggle for plugin-driven FFB: speed-gated self-centering, collision, surface texture. Note: if you toggle this off and then back on mid-session with G HUB's 'Centering Spring in Non Force Feedback Games' checkbox enabled, G HUB's canned spring may persist alongside the mod's physics spring. Workaround: cycle that G HUB checkbox off and on to force G HUB to re-evaluate. This is a G HUB limitation — its Properties API for signaling 'game is now producing FFB again' is broken.")
   let ffbEnabled: Bool = true;
-
-  @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.displayName", "FFB strength (%)")
-  @runtimeProperty("ModSettings.description", "Scales plugin-generated effects. Does not affect G HUB's centering spring.")
-  @runtimeProperty("ModSettings.min", "0")
-  @runtimeProperty("ModSettings.max", "100")
-  @runtimeProperty("ModSettings.step", "5")
-  @runtimeProperty("ModSettings.dependency", "ffbEnabled")
-  let ffbStrengthPct: Int32 = 80;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.displayName", "Debug logging")
   @runtimeProperty("ModSettings.description", "Enables verbose plugin logging. Find logs at red4ext/logs/gwheel-*.log.")
   let ffbDebugLogging: Bool = false;
 
-  // ---- Advanced (override G HUB) -----------------------------------------
-
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.displayName", "Override G HUB settings")
-  @runtimeProperty("ModSettings.description", "When ON, this mod takes control of sensitivity, rotation range, and centering spring. When OFF (default), those remain managed by Logitech G HUB.")
-  let overrideGHub: Bool = false;
-
-  @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.displayName", "Steering sensitivity")
-  @runtimeProperty("ModSettings.min", "0.25")
-  @runtimeProperty("ModSettings.max", "2.0")
-  @runtimeProperty("ModSettings.step", "0.05")
-  @runtimeProperty("ModSettings.dependency", "overrideGHub")
-  let overrideSensitivity: Float = 1.0;
-
-  @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.displayName", "Operating range (degrees)")
-  @runtimeProperty("ModSettings.description", "CP2077's steering tops out at about 90 degrees of virtual wheel rotation. Raise this for more physical travel at the cost of lower on-screen responsiveness per degree.")
-  @runtimeProperty("ModSettings.min", "40")
-  @runtimeProperty("ModSettings.max", "900")
-  @runtimeProperty("ModSettings.step", "10")
-  @runtimeProperty("ModSettings.dependency", "overrideGHub")
-  let overrideRangeDeg: Int32 = 90;
-
-  @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.displayName", "Centering spring strength (%)")
+  @runtimeProperty("ModSettings.displayName", "FFB strength (%)")
+  @runtimeProperty("ModSettings.description", "Mod-side multiplier on every force this mod generates (spring, active torque, damper, road surface). Composes with G HUB's TRUEFORCE Torque. The Logi Properties API is broken on recent G HUB builds, so we apply the scaling before the effect reaches the SDK rather than via overallGain.")
   @runtimeProperty("ModSettings.min", "0")
   @runtimeProperty("ModSettings.max", "100")
   @runtimeProperty("ModSettings.step", "5")
-  @runtimeProperty("ModSettings.dependency", "overrideGHub")
-  let overrideCenteringSpringPct: Int32 = 50;
+  @runtimeProperty("ModSettings.dependency", "ffbEnabled")
+  let ffbTorquePct: Int32 = 100;
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.displayName", "Stationary threshold (m/s)")
+  @runtimeProperty("ModSettings.description", "Below this speed the wheel is free (no centering forces). ~0.5 m/s is a slow walking pace.")
+  @runtimeProperty("ModSettings.min", "0.0")
+  @runtimeProperty("ModSettings.max", "5.0")
+  @runtimeProperty("ModSettings.step", "0.1")
+  @runtimeProperty("ModSettings.dependency", "ffbEnabled")
+  let stationaryThresholdMps: Float = 0.5;
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.displayName", "Cornering feedback (%)")
+  @runtimeProperty("ModSettings.description", "Extra spring stiffness added while the car is rotating hard (cornering, sliding). Approximates dynamic tire alignment torque — hard corners feel heavier than straight-line driving.")
+  @runtimeProperty("ModSettings.min", "0")
+  @runtimeProperty("ModSettings.max", "100")
+  @runtimeProperty("ModSettings.step", "5")
+  @runtimeProperty("ModSettings.dependency", "ffbEnabled")
+  let yawFeedbackPct: Int32 = 50;
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.displayName", "Active torque (%)")
+  @runtimeProperty("ModSettings.description", "Active push-back toward center, proportional to speed × steering angle. Models tire alignment torque — the faster you go and the further off-center the wheel is, the harder the car pushes it back. Peak at max deflection + cruise speed. 0 = disabled (passive spring only).")
+  @runtimeProperty("ModSettings.min", "0")
+  @runtimeProperty("ModSettings.max", "100")
+  @runtimeProperty("ModSettings.step", "5")
+  @runtimeProperty("ModSettings.dependency", "ffbEnabled")
+  let activeTorqueStrengthPct: Int32 = 100;
+
+  // ---- Wheel hardware ---------------------------------------------------
+  //
+  // Operating range is owned by Logitech G HUB (per-profile). The mod
+  // reads G HUB's current value and auto-scales FFB to match, so a 900-
+  // degree rotation isn't weighed down by SAT meant for a 180. Change
+  // the operating range in G HUB's Cyberpunk 2077 profile.
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.displayName", "Steering sensitivity")
+  @runtimeProperty("ModSettings.description", "Linear multiplier on raw wheel position before it hits the game's input. 1.0 = full physical range maps to full lock. Lower = part of your physical rotation is dead; higher = hit full lock before physically reaching it.")
+  @runtimeProperty("ModSettings.min", "0.25")
+  @runtimeProperty("ModSettings.max", "2.0")
+  @runtimeProperty("ModSettings.step", "0.05")
+  let steeringSensitivity: Float = 1.0;
 
   // ---- Button bindings (all user-assignable) -----------------------------
   //
@@ -225,13 +235,14 @@ public class GWheelSettings extends IScriptable {
     GWheel_SetBrakeDeadzonePct(this.brakeDeadzonePct);
 
     GWheel_SetFfbEnabled(this.ffbEnabled);
-    GWheel_SetFfbStrengthPct(this.ffbStrengthPct);
     GWheel_SetFfbDebugLogging(this.ffbDebugLogging);
+    GWheel_SetFfbTorquePct(this.ffbTorquePct);
 
-    GWheel_SetOverrideEnabled(this.overrideGHub);
-    GWheel_SetOverrideSensitivity(this.overrideSensitivity);
-    GWheel_SetOverrideRangeDeg(this.overrideRangeDeg);
-    GWheel_SetOverrideCenteringSpringPct(this.overrideCenteringSpringPct);
+    GWheel_SetStationaryThresholdMps(this.stationaryThresholdMps);
+    GWheel_SetYawFeedbackPct(this.yawFeedbackPct);
+    GWheel_SetActiveTorqueStrengthPct(this.activeTorqueStrengthPct);
+
+    GWheel_SetSteeringSensitivity(this.steeringSensitivity);
 
     // Input IDs match the PhysicalInput enum in
     // gwheel/src/input_bindings.h. D-pad + A/B/X/Y (ids 2-9) are
