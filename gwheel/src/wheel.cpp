@@ -58,7 +58,8 @@ namespace gwheel::wheel
             Caps               caps{};
 
             std::atomic<uint32_t> initAttempts{0};
-            std::atomic<bool>     helloFired{false};
+            std::atomic<bool>     handshakeFired{false};
+            std::atomic<bool>     handshakeActive{false};
 
         };
 
@@ -200,55 +201,106 @@ namespace gwheel::wheel
             }
         }
 
-        void FireHelloPulse(int idx)
+        // Single entry point for every LED write. Handles the G923
+        // "idle-indicator" quirk: with firstLedOn=0 and currentRPM=0,
+        // the wheel firmware leaves the outermost green LEDs lit as a
+        // "ready to rev" marker. Pushing currentRPM strictly below
+        // firstLedOn (here 100 < 200) guarantees the bar goes fully dark.
+        void WriteLeds(int idx, float value)
+        {
+            if (value <= 0.005f)
+                LogiPlayLeds(idx, 0.f, 100.f, 200.f);
+            else
+                LogiPlayLeds(idx, std::clamp(value, 0.f, 1.f), 0.f, 1.f);
+        }
+
+        void FireGwheelHandshake(int idx)
         {
             auto& st = S();
-            if (st.helloFired.exchange(true)) return;
+            if (st.handshakeFired.exchange(true)) return;
             std::thread([idx] {
                 using namespace std::chrono_literals;
-                std::this_thread::sleep_for(400ms);
-                log::Info("[gwheel] firing hello pulse (2 triplets + center)");
+                auto& st = S();
 
-                // Two triplets: R L R, L R L. Final step centers.
-                // 300 BPM: quarter note = 200ms. Rhythm per measure is
-                // quarter quarter quarter rest. Each beat fires a short
-                // kick of force then releases for the remainder of the beat
-                // so the pulse feels like a tap rather than a held push.
+                // Raise the handshake-active flag for the duration so the
+                // LED controller (led.cpp) yields the bar to us.
+                st.handshakeActive.store(true, std::memory_order_release);
+
+                log::Info("[gwheel] firing gwheel handshake (LED sweep + 4 triplets + centering breath)");
+
+                // Small helper: linear LED ramp from `from` to `to` over
+                // `total`. Steps at ~33ms (matches the LED controller's
+                // tick rate) for a perceptually smooth sweep without
+                // hammering the SDK.
+                auto ledSweep = [](int deviceIdx, float from, float to,
+                                   std::chrono::milliseconds total) {
+                    constexpr auto kStep = std::chrono::milliseconds(33);
+                    const int steps = std::max<int>(1, static_cast<int>(total / kStep));
+                    for (int i = 1; i <= steps; ++i) {
+                        const float t = static_cast<float>(i) / static_cast<float>(steps);
+                        const float v = from + (to - from) * t;
+                        WriteLeds(deviceIdx, v);
+                        std::this_thread::sleep_for(kStep);
+                    }
+                };
+
+                // --- LED pre-roll: 400ms sweep-up / sweep-down --------
+                // Replaces the old 400ms idle sleep; same total duration.
+                ledSweep(idx, 0.f, 1.f, 200ms);
+                ledSweep(idx, 1.f, 0.f, 200ms);
+
+                // --- Triplets: R L R, L R L, R L R, L R L ------------
+                // 300 BPM: quarter note = 200ms. Each beat fires a short
+                // force kick AND flashes the LED bar full for the kick
+                // duration; the bar goes dark between kicks so the lights
+                // track the rhythm instead of blurring together.
                 constexpr int kTriplets[2][3] = {
                     { +1, -1, +1 },   // R L R
                     { -1, +1, -1 },   // L R L
                 };
-                constexpr auto kPulseMs   = 40ms;               // active kick
-                constexpr auto kBeatMs    = 200ms;              // quarter @ 300 BPM
-                constexpr auto kGapMs     = kBeatMs - kPulseMs; // silence within beat
-                constexpr auto kRestMs    = 200ms;              // quarter rest between triplets
-                constexpr int  kMagnitude = 45;                 // percent
-                constexpr int  kNumTriplets = 4;                // R-L-R, L-R-L, R-L-R, L-R-L
+                constexpr auto kPulseMs     = 40ms;               // active kick
+                constexpr auto kBeatMs      = 200ms;              // quarter @ 300 BPM
+                constexpr auto kGapMs       = kBeatMs - kPulseMs; // silence within beat
+                constexpr auto kRestMs      = 200ms;              // rest between triplets
+                constexpr int  kMagnitude   = 45;                 // percent
+                constexpr int  kNumTriplets = 4;
 
                 for (int t = 0; t < kNumTriplets; ++t)
                 {
                     for (int b = 0; b < 3; ++b)
                     {
                         LogiPlayConstantForce(idx, kTriplets[t % 2][b] * kMagnitude);
+                        WriteLeds(idx, 1.f);
                         std::this_thread::sleep_for(kPulseMs);
                         LogiStopConstantForce(idx);
+                        WriteLeds(idx, 0.f);
                         std::this_thread::sleep_for(kGapMs);
                     }
                     std::this_thread::sleep_for(kRestMs);
                 }
 
-                // Final step: hold a 100% centering spring for 3s, then
-                // release so game-driven FFB can take over.
+                // --- Centering hold: 3s spring + LED breath pulse -----
+                // Three 1-second breaths (up 500ms, down 500ms, peak
+                // 70% so a full-scale finish from the prior flashes
+                // reads as "calm" rather than "still alarming"). Total
+                // 3000ms matches the original centering hold window.
                 LogiStopConstantForce(idx);
                 LogiStopDamperForce(idx);
                 const bool springOk = LogiPlaySpringForce(idx, 0, 100, 100);
-                log::InfoF("[gwheel] hello centering begin (spring=%d) - holding 3s",
+                log::InfoF("[gwheel] handshake centering begin (spring=%d) - holding 3s with LED breath",
                            springOk ? 1 : 0);
-                std::this_thread::sleep_for(3000ms);
-                log::Info("[gwheel] hello centering end - releasing forces");
+                for (int i = 0; i < 3; ++i) {
+                    ledSweep(idx, 0.f, 0.7f, 500ms);
+                    ledSweep(idx, 0.7f, 0.f, 500ms);
+                }
+                log::Info("[gwheel] handshake centering end - releasing forces");
                 LogiStopSpringForce(idx);
                 LogiStopConstantForce(idx);
                 LogiStopDamperForce(idx);
+
+                // Clear the bar and hand it back to the LED controller.
+                WriteLeds(idx, 0.f);
+                st.handshakeActive.store(false, std::memory_order_release);
             }).detach();
         }
 
@@ -344,10 +396,10 @@ namespace gwheel::wheel
 
             if (snap.hasFFB)
             {
-                if (config::Current().hello.playOnStart)
-                    FireHelloPulse(idx);
+                if (config::Current().handshake.playOnStart)
+                    FireGwheelHandshake(idx);
                 else
-                    log::Info("[gwheel] hello pulse disabled by config (hello.playOnStart=false)");
+                    log::Info("[gwheel] gwheel handshake disabled by config (handshake.playOnStart=false)");
             }
 
             return true;
@@ -677,6 +729,29 @@ namespace gwheel::wheel
         LogiStopSpringForce(idx);
         LogiStopSurfaceEffect(idx);
         LogiStopCarAirborne(idx);
+    }
+
+    void PlayLeds(float level)
+    {
+        auto& st = S();
+        if (!st.ready.load()) return;
+        const int idx = st.index.load(std::memory_order_acquire);
+        if (idx < 0) return;
+        WriteLeds(idx, level);
+    }
+
+    void ClearLeds()
+    {
+        auto& st = S();
+        if (!st.ready.load()) return;
+        const int idx = st.index.load(std::memory_order_acquire);
+        if (idx < 0) return;
+        WriteLeds(idx, 0.f);
+    }
+
+    bool IsHandshakeActive()
+    {
+        return S().handshakeActive.load(std::memory_order_acquire);
     }
 
     // Surface-driven baseline magnitude for the road-surface SINE.

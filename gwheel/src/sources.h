@@ -54,4 +54,23 @@ namespace gwheel::sources
     // GWheel_Set/ClearPlayerVehicle; nullptr = not in a vehicle.
     void SetInVehicle(bool v);
     bool InVehicle();
+
+    // ---------- vehicle telemetry pushed from redscript ---------------------
+    //
+    // Populated by Blackboard listeners in gwheel_vehicle_signals.reds.
+    // Cleared to 0/false on vehicle unmount. The LED controller reads
+    // these to decide whether to show the rev strip (real RPM) or the
+    // music visualizer (radio-driven). Reads are atomic and safe from
+    // any thread.
+
+    // Normalized engine RPM in [0..1] = VehicleDef.RPMValue / MaxRPM.
+    // 0 when not in a vehicle.
+    void  SetEngineRpmNormalized(float v);
+    float EngineRpmNormalized();
+
+    // Vehicle radio receiver state — true when the in-car radio is on
+    // AND a station is playing. false when radio off or not in a
+    // vehicle. Mirrors VehicleDef.VehRadioState.
+    void SetRadioActive(bool v);
+    bool RadioActive();
 }

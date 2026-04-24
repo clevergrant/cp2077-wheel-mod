@@ -19,6 +19,12 @@ public static native func GWheel_SetStationaryThresholdMps(mps: Float) -> Bool;
 public static native func GWheel_SetYawFeedbackPct(pct: Int32) -> Bool;
 public static native func GWheel_SetActiveTorqueStrengthPct(pct: Int32) -> Bool;
 
+// Rev-strip LED bar on top of the wheel (G29/G920/G923). VisualizerWhileMusic
+// swaps the speed-driven rev bar for a WASAPI-loopback audio visualizer
+// whenever system audio is playing; falls back to rev-strip on silence.
+public static native func GWheel_SetLedEnabled(v: Bool) -> Bool;
+public static native func GWheel_SetLedVisualizerWhileMusic(v: Bool) -> Bool;
+
 // Per-physical-input action binding. inputId is one of the stable IDs in
 // gwheel/src/input_bindings.h (0 = PaddleLeft, 1 = PaddleRight, etc.).
 // action is a GWheelAction enum value cast to Int32; the plugin dispatches
@@ -33,6 +39,12 @@ public static native func GWheel_SetInputBinding(inputId: Int32, action: Int32) 
 // wrappers.
 public static native func GWheel_SetPlayerVehicle(v: ref<VehicleObject>) -> Bool;
 public static native func GWheel_ClearPlayerVehicle() -> Bool;
+
+// Vehicle telemetry pushed from Blackboard listeners (gwheel_vehicle_signals.reds).
+// Normalized engine RPM in [0..1] = RPMValue / VehEngineData.MaxRPM().
+// Radio state mirrors VehicleDef.VehRadioState.
+public static native func GWheel_SetEngineRpmNormalized(v: Float) -> Bool;
+public static native func GWheel_SetRadioActive(v: Bool) -> Bool;
 
 // Collision / bump feedback. lateralKick is the world-space hit direction
 // dotted with the vehicle's right vector, signed in [-1..+1] (negative =

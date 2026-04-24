@@ -12,6 +12,8 @@ set(GWHEEL_SOURCES
   src/rtti_dump.cpp
   src/rtti_offsets.cpp
   src/logging.cpp
+  src/audio_monitor.cpp
+  src/led.cpp
 )
 
 set(GWHEEL_HEADERS
@@ -28,6 +30,8 @@ set(GWHEEL_HEADERS
   src/rtti.h
   src/rtti_dump.h
   src/rtti_offsets.h
+  src/audio_monitor.h
+  src/led.h
   include/gwheel_abi.h
 )
 
@@ -59,6 +63,13 @@ target_link_libraries(gwheel
     "${LOGI_SDK_LIB}"
     dinput8
     dxguid
+    # WASAPI loopback capture for the LED music visualizer:
+    #   ole32     — CoInitializeEx / CoCreateInstance
+    #   uuid      — GUID constants for MMDevice / IAudioClient / KSDATAFORMAT_*
+    #   mmdevapi  — ActivateAudioInterfaceAsync (per-process loopback API)
+    ole32
+    uuid
+    mmdevapi
 )
 
 set_target_properties(gwheel PROPERTIES

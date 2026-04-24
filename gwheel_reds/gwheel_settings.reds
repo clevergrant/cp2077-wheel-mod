@@ -73,6 +73,19 @@ public class GWheelSettings extends IScriptable {
   @runtimeProperty("ModSettings.dependency", "ffbEnabled")
   let activeTorqueStrengthPct: Int32 = 100;
 
+  // ---- Rev-strip LEDs ---------------------------------------------------
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.displayName", "Enable rev-strip LEDs")
+  @runtimeProperty("ModSettings.description", "Drive the 10-segment LED bar on top of the wheel (G29/G920/G923). When off, G HUB's own profile drives the LEDs or they stay dark.")
+  let ledEnabled: Bool = true;
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.displayName", "Rev strip as visualizer while music is playing")
+  @runtimeProperty("ModSettings.description", "When music or other system audio is playing, the LED bar becomes a dynamic-range-normalized visualizer instead of a rev strip. When audio goes silent, falls back to rev-strip (speed-driven) automatically. Works with CP2077's radio, Spotify, YouTube — anything mixing into the default output device.")
+  @runtimeProperty("ModSettings.dependency", "ledEnabled")
+  let ledVisualizerWhileMusic: Bool = true;
+
   // ---- Wheel hardware ---------------------------------------------------
   //
   // Operating range and sensitivity are owned by Logitech G HUB (per-
@@ -213,6 +226,9 @@ public class GWheelSettings extends IScriptable {
     GWheel_SetStationaryThresholdMps(this.stationaryThresholdMps);
     GWheel_SetYawFeedbackPct(this.yawFeedbackPct);
     GWheel_SetActiveTorqueStrengthPct(this.activeTorqueStrengthPct);
+
+    GWheel_SetLedEnabled(this.ledEnabled);
+    GWheel_SetLedVisualizerWhileMusic(this.ledVisualizerWhileMusic);
 
     // Input IDs match the PhysicalInput enum in
     // gwheel/src/input_bindings.h. D-pad + A/B/X/Y (ids 2-9) are

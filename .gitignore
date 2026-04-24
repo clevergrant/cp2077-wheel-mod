@@ -55,6 +55,8 @@ game-copy/
 *.dmp
 crash_*
 error_*
+# redMod.exe logs to its cwd when invoked — belongs to the game tool, not us
+REDmodLog.txt
 
 # Windows
 Thumbs.db

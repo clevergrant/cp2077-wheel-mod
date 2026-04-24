@@ -7,6 +7,7 @@
 #include "logging.h"
 #include "rtti_dump.h"
 #include "rtti_offsets.h"
+#include "sources.h"
 
 #include <RED4ext/RED4ext.hpp>
 
@@ -139,6 +140,26 @@ namespace gwheel::rtti
         {
             aFrame->code++;
             vehicle_hook::SetPlayerVehicle(nullptr);
+            if (aOut) *aOut = true;
+        }
+
+        // Vehicle telemetry pushed from redscript Blackboard listeners.
+        // See gwheel_vehicle_signals.reds.
+        void SetEngineRpmNormalized(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        {
+            float v = 0.f;
+            RED4ext::GetParameter(aFrame, &v);
+            aFrame->code++;
+            sources::SetEngineRpmNormalized(v);
+            if (aOut) *aOut = true;
+        }
+
+        void SetRadioActive(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        {
+            bool v = false;
+            RED4ext::GetParameter(aFrame, &v);
+            aFrame->code++;
+            sources::SetRadioActive(v);
             if (aOut) *aOut = true;
         }
 
@@ -296,6 +317,13 @@ namespace gwheel::rtti
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetActiveTorqueStrengthPct>),
                            "Bool", {{ "Int32", "pct" }});
 
+            RegisterGlobal(rtti, "GWheel_SetLedEnabled",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetLedEnabled>),
+                           "Bool", {{ "Bool", "v" }});
+            RegisterGlobal(rtti, "GWheel_SetLedVisualizerWhileMusic",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetLedVisualizerWhileMusic>),
+                           "Bool", {{ "Bool", "v" }});
+
             RegisterGlobal(rtti, "GWheel_SetInputBinding",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInputBinding),
                            "Bool", {{ "Int32", "inputId" }, { "Int32", "action" }});
@@ -306,6 +334,13 @@ namespace gwheel::rtti
             RegisterGlobal(rtti, "GWheel_ClearPlayerVehicle",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&ClearPlayerVehicle),
                            "Bool", {});
+
+            RegisterGlobal(rtti, "GWheel_SetEngineRpmNormalized",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetEngineRpmNormalized),
+                           "Bool", {{ "Float", "v" }});
+            RegisterGlobal(rtti, "GWheel_SetRadioActive",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetRadioActive),
+                           "Bool", {{ "Bool", "v" }});
 
             RegisterGlobal(rtti, "GWheel_OnVehicleBump",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&OnVehicleBump),

@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "hello": {
+  "version": 4,
+  "handshake": {
     "playOnStart": true
   }
 }

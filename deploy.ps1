@@ -61,7 +61,8 @@ $redsFiles = @(
   "gwheel_reds\gwheel_settings.reds",
   "gwheel_reds\gwheel_mount.reds",
   "gwheel_reds\gwheel_events.reds",
-  "gwheel_reds\gwheel_surface.reds"
+  "gwheel_reds\gwheel_surface.reds",
+  "gwheel_reds\gwheel_vehicle_signals.reds"
 )
 foreach ($r in $redsFiles) {
   if (-not (Test-Path $r)) { Fail "Missing redscript source: $r" }
@@ -251,7 +252,7 @@ if ($Game) {
   Write-Host ("     Look for:   [gwheel] loaded v" + $version)
   Write-Host '                 [gwheel] Logitech Steering Wheel SDK v...'
   Write-Host '                 [gwheel] wheel bound at SDK slot 0: "G923 ..."'
-  Write-Host '                 [gwheel] firing hello pulse (confirms FFB is live)'
+  Write-Host '                 [gwheel] firing gwheel handshake (LED sweep + 4 triplets + centering breath)'
   Write-Host '                 [gwheel:hook] UpdateVehicleCameraInput fired for the first time (live-hook signal once you enter a vehicle)'
   Write-Host '     If the game fails to launch with an RED4ext MessageBox, the UpdateVehicleCameraInput hash did not resolve - update RED4ext itself (its address database ships per game patch).'
   Write-Host '  3. Check redscript compile log (if the Settings page or mount/menu wrappers break):'

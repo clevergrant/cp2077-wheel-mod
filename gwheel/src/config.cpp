@@ -96,8 +96,21 @@ namespace gwheel::config
             out << "    \"activeTorqueStrengthPct\": " << c.ffb.activeTorqueStrengthPct                << "\n";
             out << "  },\n";
 
-            out << "  \"hello\": {\n";
-            out << "    \"playOnStart\": " << (c.hello.playOnStart ? "true" : "false") << "\n";
+            out << "  \"handshake\": {\n";
+            out << "    \"playOnStart\": " << (c.handshake.playOnStart ? "true" : "false") << "\n";
+            out << "  },\n";
+
+            out << "  \"led\": {\n";
+            out << "    \"enabled\": "              << (c.led.enabled ? "true" : "false")              << ",\n";
+            out << "    \"visualizerWhileMusic\": " << (c.led.visualizerWhileMusic ? "true" : "false") << "\n";
+            out << "  },\n";
+
+            out << "  \"music\": {\n";
+            {
+                std::string esc;
+                EscapeJsonTo(esc, c.music.processName);
+                out << "    \"processName\": " << esc << "\n";
+            }
             out << "  },\n";
 
             auto emitVeh = [&](const char* name, const PerVehicle& pv, bool last) {
@@ -228,7 +241,17 @@ namespace gwheel::config
             ExtractInt   (text, "ffb",      "yawFeedbackPct",         c.ffb.yawFeedbackPct);
             ExtractInt   (text, "ffb",      "activeTorqueStrengthPct", c.ffb.activeTorqueStrengthPct);
 
-            ExtractBool  (text, "hello",    "playOnStart",            c.hello.playOnStart);
+            // "handshake" is the current key. Older config.json files from
+            // pre-rename installs used "hello" for the same field; read
+            // that first so existing settings migrate, then overwrite with
+            // the new key if present.
+            ExtractBool  (text, "hello",     "playOnStart",            c.handshake.playOnStart);
+            ExtractBool  (text, "handshake", "playOnStart",            c.handshake.playOnStart);
+
+            ExtractBool  (text, "led",      "enabled",                c.led.enabled);
+            ExtractBool  (text, "led",      "visualizerWhileMusic",   c.led.visualizerWhileMusic);
+
+            ExtractString(text, "music",    "processName",            c.music.processName);
 
             auto vehExtract = [&](const char* section, PerVehicle& pv) {
                 ExtractFloat(text, section, "steeringMultiplier", pv.steeringMultiplier);
@@ -362,7 +385,16 @@ namespace gwheel::config
     void SetYawFeedbackPct(int32_t v)       { Mutate([&](Config& c){ c.ffb.yawFeedbackPct = std::clamp(v, 0, 100); }); }
     void SetActiveTorqueStrengthPct(int32_t v) { Mutate([&](Config& c){ c.ffb.activeTorqueStrengthPct = std::clamp(v, 0, 100); }); }
 
-    void SetHelloPlayOnStart(bool v)        { Mutate([&](Config& c){ c.hello.playOnStart = v; }); }
+    void SetHandshakePlayOnStart(bool v)    { Mutate([&](Config& c){ c.handshake.playOnStart = v; }); }
+
+    void SetLedEnabled(bool v)              { Mutate([&](Config& c){ c.led.enabled = v; }); }
+    void SetLedVisualizerWhileMusic(bool v) { Mutate([&](Config& c){ c.led.visualizerWhileMusic = v; }); }
+
+    void SetMusicProcessName(std::string_view v)
+    {
+        std::string s(v);
+        Mutate([&](Config& c){ c.music.processName = s; });
+    }
 
     void SetInputBinding(int32_t inputId, int32_t action)
     {

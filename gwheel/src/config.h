@@ -49,20 +49,53 @@ namespace gwheel::config
         int32_t responseDelayMs = 20;
     };
 
-    struct Hello
+    struct Handshake
     {
-        // Play the FFB handshake (4 triplets + centering) on wheel connect.
-        // Installer-level choice; persisted to config.json so it survives
-        // restarts until changed.
+        // Play the gwheel handshake (LED sweep → 4 triplets + synced LED
+        // flashes → centering spring with LED breath pulse) on wheel
+        // connect. Installer-level choice; persisted to config.json so
+        // it survives restarts until changed.
         bool playOnStart = true;
+    };
+
+    struct Led
+    {
+        // Master toggle for the wheel's rev-strip LEDs (G29/G920/G923 etc.).
+        // When off, the plugin never calls LogiPlayLeds — G HUB's own
+        // profile drives them (or they stay dark).
+        bool enabled = true;
+
+        // When true AND system audio is playing, the LED bar tracks a
+        // dynamic-range-normalised audio envelope instead of vehicle
+        // speed. Silence (below the WASAPI loopback noise gate) falls
+        // back to rev-strip automatically.
+        bool visualizerWhileMusic = true;
+    };
+
+    struct Music
+    {
+        // Target process name for per-process audio capture. Empty =
+        // capture the system default render endpoint (everything the
+        // system mixes — game audio included). Non-empty = try to
+        // attach per-process loopback to just this process's audio
+        // tree so the visualizer only reacts to e.g. Spotify and
+        // ignores CP2077's own SFX/radio.
+        //
+        // Examples: "Spotify.exe", "firefox.exe", "chrome.exe".
+        // Case-insensitive match on the executable filename. If the
+        // named process isn't running when the plugin starts, we
+        // fall back to system-wide loopback with a warning.
+        std::string processName;
     };
 
     struct Config
     {
-        int32_t     version = 3;
+        int32_t     version = 4;
         Input       input;
         Ffb         ffb;
-        Hello       hello;
+        Handshake   handshake;
+        Led         led;
+        Music       music;
         PerVehicle  car        = { 1.0f, 20 };
         PerVehicle  motorcycle = { 1.2f, 10 };
         PerVehicle  truck      = { 0.8f, 40 };
@@ -102,7 +135,12 @@ namespace gwheel::config
     void SetYawFeedbackPct(int32_t v);
     void SetActiveTorqueStrengthPct(int32_t v);
 
-    void SetHelloPlayOnStart(bool v);
+    void SetHandshakePlayOnStart(bool v);
+
+    void SetLedEnabled(bool v);
+    void SetLedVisualizerWhileMusic(bool v);
+
+    void SetMusicProcessName(std::string_view v);
 
     // Single-input binding: inputId in [0, kBindingCount), action as the
     // Action int from input_bindings.h.

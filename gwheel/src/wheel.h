@@ -50,6 +50,22 @@ namespace gwheel::wheel
     void SetGlobalStrength(float mul);   // 0..1 multiplier applied to all effect magnitudes
     void StopAll();
 
+    // Drive the wheel's rev-strip LEDs to a normalised 0..1 level. 0 = all
+    // dark, 1 = full bar (green → amber → red). Safe to call at any
+    // rate; the SDK rate-limits internally. No-op if the SDK isn't bound
+    // or no wheel is connected.
+    void PlayLeds(float level);
+
+    // Force the LED bar dark. Called on LED-feature disable and on
+    // plugin shutdown so the bar doesn't latch at its last value.
+    void ClearLeds();
+
+    // True while the startup handshake thread is driving the wheel. The
+    // LED controller yields the bar during this window so the handshake
+    // sweep / flashes / breath pulse aren't fighting 30 Hz rev-strip or
+    // visualizer writes.
+    bool IsHandshakeActive();
+
     // Fire a one-shot directional jolt on the wheel. `lateralKick` is signed
     // in [-1..+1] — negative = kick toward the left, positive = toward the
     // right. `durationMs` controls the decay window; the effect overlays on
