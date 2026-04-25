@@ -38,6 +38,13 @@ namespace gwheel::vehicle_hook
     // the player's hits should reach the wheel.
     bool IsPlayerVehicle(void* p);
 
+    // Read accessor for the cached player-vehicle pointer. Used by the
+    // direct-action dispatcher in input_bindings to invoke vehicleBaseObject
+    // methods (ToggleRadioReceiver, NextRadioReceiverStation, ToggleSiren,
+    // etc.) without going through CP2077's keyboard binding layer. nullptr
+    // when not in a vehicle.
+    void* GetPlayerVehicle();
+
     // Called by the GWheel_SampleWheelMaterials native (redscript-side
     // PersistencySystem polling forwards the `vehiclePersistentDataPS`
     // handle each tick). Reads the 4 per-wheel CName hashes at offset

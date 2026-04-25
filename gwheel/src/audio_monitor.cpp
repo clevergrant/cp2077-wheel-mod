@@ -6,6 +6,8 @@
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <audioclientactivationparams.h>
+#include <audiopolicy.h>
+#include <endpointvolume.h>
 #include <mmreg.h>
 #include <ksmedia.h>
 #include <tlhelp32.h>
@@ -18,6 +20,7 @@
 #include <deque>
 #include <limits>
 #include <thread>
+#include <vector>
 
 namespace gwheel::audio_monitor
 {
@@ -26,6 +29,13 @@ namespace gwheel::audio_monitor
         std::atomic<bool>  g_running{false};
         std::atomic<float> g_level{0.f};
         std::thread        g_thread;
+
+        // Live per-app session volume scalar [0..1]. Updated instantly
+        // on Game Bar / Volume Mixer changes via IAudioSessionEvents,
+        // not polled — so when the user drags the slider, compensation
+        // tracks within a single capture tick (10 ms) instead of
+        // waiting for a 500 ms poll round-trip.
+        std::atomic<float> g_volumeScalar{1.f};
 
         // Rolling window for dynamic-range normalisation. At 10ms
         // chunks, 300 chunks = 3 seconds — long enough to stretch a
@@ -45,19 +55,21 @@ namespace gwheel::audio_monitor
         // -----------------------------------------------------------------
         // Bass-band IIR bandpass filter.
         //
-        // The in-car LED visualizer runs on the full CP2077 main audio
-        // bus (music + engine + SFX + dialogue, all mixed inside the
-        // game process). We can't isolate the music bus — that requires
-        // tapping Wwise internally, which is blocked on stripped-symbol
-        // reverse engineering. Bandpass around the 40-160 Hz kick/bass
-        // region is the practical workaround: music's bass line and
-        // percussion produce sharp transients there, while engine audio
-        // and dialogue mostly sit in different spectral regions (mid
-        // for dialogue, broadband rumble for engine — the rumble's
-        // fundamental passes through but without the transient punch).
+        // Two short-lived attempts to remove this filter (2026-04-24,
+        // first to "fix" sparse-music dark stretches, then again with
+        // full-band RMS) both made the visualizer track engine + dialogue
+        // + SFX more than the music. Result was a bar that pulsed with
+        // the world rather than the song — the user reported "completely
+        // unrelated to what I'm hearing." Bass-band is a deliberate
+        // engine/dialogue rejection: kick drums and bass lines have
+        // sharp transients in 40-160 Hz where engine sits too, but
+        // music's transients are *steeper* (single-cycle attacks) and
+        // win the rolling-min/peak normalisation downstream. The trade-
+        // off: bass-light tracks (sparse vocal, ambient) under-drive
+        // the bar. We accept that over the alternative.
         //
-        // Transposed Direct Form II. Coefficients designed once at
-        // init time from the WASAPI mix-format sample rate.
+        // Transposed Direct Form II. Coefficients designed once at init
+        // time from the WASAPI mix-format sample rate.
         struct Biquad
         {
             float b0{0.f}, b1{0.f}, b2{0.f}, a1{0.f}, a2{0.f};
@@ -89,11 +101,9 @@ namespace gwheel::audio_monitor
             void Reset() { z1 = z2 = 0.f; }
         };
 
-        // One filter, mono-post-mixdown. 80 Hz center covers kick drums
-        // and bass; Q=0.7 gives about an octave of pass width (~55–115 Hz
-        // at -3 dB). Designed lazily at format discovery time so we
-        // adapt to whatever sample rate WASAPI hands us (typically
-        // 44100 or 48000).
+        // 80 Hz center, Q=0.7 → pass band ~55-115 Hz at -3 dB. Designed
+        // lazily at format-discovery time so we adapt to whatever sample
+        // rate WASAPI hands us (typically 44100 or 48000).
         Biquad g_bassFilter{};
         bool   g_bassFilterDesigned = false;
 
@@ -124,14 +134,11 @@ namespace gwheel::audio_monitor
 
         // Compute mean-square (not RMS — sqrt comes after accumulation
         // across all chunks in the packet). Each frame is mono-averaged
-        // across channels then run through the bass-band bandpass filter;
-        // the filtered sample is what gets squared. End result is an
-        // energy reading of only the 40-160 Hz band, which is where
-        // music kick/bass transients live while engine rumble is more
-        // spread-spectrum.
-        //
-        // Filter state (biquad delays) persists across chunks via the
-        // file-scope g_bassFilter, so cross-packet continuity is correct.
+        // across channels then run through the bass-band bandpass; the
+        // filtered sample is what gets squared. End result is energy in
+        // ~55-115 Hz where music kick/bass lives. Filter state (biquad
+        // delays) persists across chunks via file-scope g_bassFilter, so
+        // cross-packet continuity is correct.
         double ChunkMeanSquare(const BYTE* data, uint32_t numFrames, const WAVEFORMATEX* fmt)
         {
             if (numFrames == 0) return 0.0;
@@ -203,6 +210,224 @@ namespace gwheel::audio_monitor
             }
             CloseHandle(snap);
             return found;
+        }
+
+        // IAudioSessionEvents listener that pushes per-app volume
+        // changes straight into g_volumeScalar. Game Bar / Volume
+        // Mixer fire OnSimpleVolumeChanged synchronously when the
+        // user drags a slider, giving us instant compensation
+        // updates with zero per-tick overhead.
+        struct SessionVolumeListener : public IAudioSessionEvents
+        {
+            LONG m_refs = 1;
+
+            ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_refs); }
+            ULONG STDMETHODCALLTYPE Release() override
+            {
+                const LONG n = InterlockedDecrement(&m_refs);
+                if (n == 0) delete this;
+                return static_cast<ULONG>(n);
+            }
+            HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override
+            {
+                if (!ppv) return E_POINTER;
+                if (riid == __uuidof(IUnknown) || riid == __uuidof(IAudioSessionEvents))
+                {
+                    *ppv = static_cast<IAudioSessionEvents*>(this);
+                    AddRef();
+                    return S_OK;
+                }
+                *ppv = nullptr;
+                return E_NOINTERFACE;
+            }
+
+            HRESULT STDMETHODCALLTYPE OnSimpleVolumeChanged(float newVolume, BOOL newMute, LPCGUID) override
+            {
+                const float v = (newMute || newVolume <= 0.f) ? 0.f : newVolume;
+                g_volumeScalar.store(v, std::memory_order_release);
+                return S_OK;
+            }
+
+            // Unused but required by the interface.
+            HRESULT STDMETHODCALLTYPE OnDisplayNameChanged(LPCWSTR, LPCGUID)        override { return S_OK; }
+            HRESULT STDMETHODCALLTYPE OnIconPathChanged(LPCWSTR, LPCGUID)           override { return S_OK; }
+            HRESULT STDMETHODCALLTYPE OnChannelVolumeChanged(DWORD, float*, DWORD, LPCGUID) override { return S_OK; }
+            HRESULT STDMETHODCALLTYPE OnGroupingParamChanged(LPCGUID, LPCGUID)      override { return S_OK; }
+            HRESULT STDMETHODCALLTYPE OnStateChanged(AudioSessionState)             override { return S_OK; }
+            HRESULT STDMETHODCALLTYPE OnSessionDisconnected(AudioSessionDisconnectReason) override { return S_OK; }
+        };
+
+        // Resolver: find ALL audio sessions for the given PID on the
+        // default render endpoint, register a SessionVolumeListener on
+        // each, seed g_volumeScalar with the most-attenuated current
+        // volume, and append every successfully-hooked session into
+        // outSessions. Caller calls UnregisterAudioSessionNotification
+        // on each at shutdown.
+        //
+        // CP2077 (via Wwise) creates multiple audio sessions per
+        // process and Game Bar's per-app slider drives all of them in
+        // lockstep. Hooking only one means slider drags routed
+        // through a different session would not fire OnSimpleVolumeChanged
+        // on us — which manifested as ~1 s delay before the poll
+        // safety net re-read the truth. Hooking all of them gives
+        // single-tick latency regardless of which session the slider
+        // event happens to land on.
+        //
+        // Re-callable: skips sessions whose IAudioSessionControl
+        // pointer is already in outSessions (so the 1 Hz attach-retry
+        // path picks up newly-spawned sessions without double-hooking
+        // existing ones).
+        void AttachSessionVolumeListenersAll(DWORD targetPid,
+                                             SessionVolumeListener* listener,
+                                             std::vector<IAudioSessionControl*>& outSessions)
+        {
+            IMMDeviceEnumerator*     enumerator = nullptr;
+            IMMDevice*               device     = nullptr;
+            IAudioSessionManager2*   mgr        = nullptr;
+            IAudioSessionEnumerator* sessions   = nullptr;
+
+            auto cleanup = [&]() {
+                SafeRelease(sessions);
+                SafeRelease(mgr);
+                SafeRelease(device);
+                SafeRelease(enumerator);
+            };
+
+            HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr,
+                                          CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                                          reinterpret_cast<void**>(&enumerator));
+            if (FAILED(hr)) { cleanup(); return; }
+
+            hr = enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device);
+            if (FAILED(hr)) { cleanup(); return; }
+
+            hr = device->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr,
+                                  reinterpret_cast<void**>(&mgr));
+            if (FAILED(hr)) { cleanup(); return; }
+
+            hr = mgr->GetSessionEnumerator(&sessions);
+            if (FAILED(hr) || !sessions) { cleanup(); return; }
+
+            float bestScalar = -1.f;
+            int   count      = 0;
+            sessions->GetCount(&count);
+            for (int i = 0; i < count; ++i)
+            {
+                IAudioSessionControl* ctrl = nullptr;
+                if (FAILED(sessions->GetSession(i, &ctrl)) || !ctrl) continue;
+
+                IAudioSessionControl2* ctrl2 = nullptr;
+                if (SUCCEEDED(ctrl->QueryInterface(__uuidof(IAudioSessionControl2),
+                                                   reinterpret_cast<void**>(&ctrl2))) && ctrl2)
+                {
+                    DWORD pid = 0;
+                    if (SUCCEEDED(ctrl2->GetProcessId(&pid)) && pid == targetPid)
+                    {
+                        ISimpleAudioVolume* vol = nullptr;
+                        if (SUCCEEDED(ctrl->QueryInterface(__uuidof(ISimpleAudioVolume),
+                                                           reinterpret_cast<void**>(&vol))) && vol)
+                        {
+                            float v = 1.f; BOOL muted = FALSE;
+                            vol->GetMasterVolume(&v);
+                            vol->GetMute(&muted);
+                            vol->Release();
+                            const float effective = (muted || v <= 0.f) ? 0.f : v;
+                            if (bestScalar < 0.f || effective < bestScalar)
+                                bestScalar = effective;
+                        }
+
+                        bool already = false;
+                        for (auto* s : outSessions) { if (s == ctrl) { already = true; break; } }
+                        if (!already
+                            && SUCCEEDED(ctrl->RegisterAudioSessionNotification(listener)))
+                        {
+                            outSessions.push_back(ctrl);
+                            ctrl = nullptr;  // ownership transferred
+                        }
+                    }
+                    ctrl2->Release();
+                }
+                if (ctrl) ctrl->Release();
+            }
+
+            if (bestScalar >= 0.f)
+                g_volumeScalar.store(bestScalar, std::memory_order_release);
+
+            cleanup();
+        }
+
+        // Polling re-read for the safety-net path. Walks every audio
+        // session belonging to targetPid (the game can have multiple
+        // Wwise sessions; Game Bar's slider drives all of them in
+        // lockstep) and uses the LOWEST non-muted volume found, which
+        // matches what the user effectively hears. Stores into
+        // g_volumeScalar. Silent if no session is found.
+        void PollSessionVolume(DWORD targetPid)
+        {
+            IMMDeviceEnumerator*     enumerator = nullptr;
+            IMMDevice*               device     = nullptr;
+            IAudioSessionManager2*   mgr        = nullptr;
+            IAudioSessionEnumerator* sessions   = nullptr;
+
+            auto cleanup = [&]() {
+                SafeRelease(sessions);
+                SafeRelease(mgr);
+                SafeRelease(device);
+                SafeRelease(enumerator);
+            };
+
+            HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr,
+                                          CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                                          reinterpret_cast<void**>(&enumerator));
+            if (FAILED(hr)) { cleanup(); return; }
+
+            hr = enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device);
+            if (FAILED(hr)) { cleanup(); return; }
+
+            hr = device->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr,
+                                  reinterpret_cast<void**>(&mgr));
+            if (FAILED(hr)) { cleanup(); return; }
+
+            hr = mgr->GetSessionEnumerator(&sessions);
+            if (FAILED(hr) || !sessions) { cleanup(); return; }
+
+            float bestScalar = -1.f;  // sentinel: no matching session yet
+            int   count      = 0;
+            sessions->GetCount(&count);
+            for (int i = 0; i < count; ++i)
+            {
+                IAudioSessionControl* ctrl = nullptr;
+                if (FAILED(sessions->GetSession(i, &ctrl)) || !ctrl) continue;
+
+                IAudioSessionControl2* ctrl2 = nullptr;
+                if (SUCCEEDED(ctrl->QueryInterface(__uuidof(IAudioSessionControl2),
+                                                   reinterpret_cast<void**>(&ctrl2))) && ctrl2)
+                {
+                    DWORD pid = 0;
+                    if (SUCCEEDED(ctrl2->GetProcessId(&pid)) && pid == targetPid)
+                    {
+                        ISimpleAudioVolume* vol = nullptr;
+                        if (SUCCEEDED(ctrl->QueryInterface(__uuidof(ISimpleAudioVolume),
+                                                           reinterpret_cast<void**>(&vol))) && vol)
+                        {
+                            float v = 1.f; BOOL muted = FALSE;
+                            vol->GetMasterVolume(&v);
+                            vol->GetMute(&muted);
+                            vol->Release();
+                            const float effective = (muted || v <= 0.f) ? 0.f : v;
+                            if (bestScalar < 0.f || effective < bestScalar)
+                                bestScalar = effective;
+                        }
+                    }
+                    ctrl2->Release();
+                }
+                ctrl->Release();
+            }
+
+            if (bestScalar >= 0.f)
+                g_volumeScalar.store(bestScalar, std::memory_order_release);
+
+            cleanup();
         }
 
         // Minimal IActivateAudioInterfaceCompletionHandler. The per-process
@@ -371,31 +596,56 @@ namespace gwheel::audio_monitor
                 if (comOk) CoUninitialize();
             };
 
-            // Pick a capture source. Prefer per-process loopback when the
-            // user has configured music.processName; fall back to system-
-            // wide loopback if the target process isn't running or the
-            // per-process activation fails. When processName is empty,
-            // skip the per-process attempt entirely.
+            // Pick a capture source. Default (empty processName) is
+            // per-process loopback against our OWN process — gwheel.dll
+            // is loaded inside Cyberpunk2077.exe, so GetCurrentProcessId()
+            // *is* the game's PID. That gives us a clean tap of just the
+            // game's audio tree (radio + engine + SFX, but nothing else
+            // on the system). Without this, the system-wide loopback
+            // mixed in any other app the user had making noise — Spotify
+            // tabs, Discord, browser auto-play — and the visualizer
+            // appeared to "react to a different song" because it
+            // literally was. Non-empty processName is an advanced
+            // override for capturing some other app's audio (e.g.
+            // streaming a separate Spotify session). System-wide
+            // loopback only happens as a last-resort fallback if
+            // per-process activation fails outright.
             const auto cfg = config::Current();
-            bool perProcess = false;
-            if (!cfg.music.processName.empty())
+            bool  perProcess  = false;
+            DWORD attachedPid = 0;  // tracked so the capture loop can poll session volume
             {
-                const DWORD pid = FindProcessIdByName(cfg.music.processName);
-                if (pid == 0)
+                DWORD pid = 0;
+                std::string targetLabel;
+                if (cfg.music.processName.empty())
                 {
-                    log::WarnF("[gwheel:audio] music.processName=\"%s\" not running — falling back to system loopback",
-                               cfg.music.processName.c_str());
-                }
-                else if (OpenPerProcessLoopback(pid, &client, &mixFormat))
-                {
-                    log::InfoF("[gwheel:audio] per-process loopback attached to \"%s\" (pid=%u, 44100 Hz 16-bit stereo)",
-                               cfg.music.processName.c_str(), pid);
-                    perProcess = true;
+                    pid = GetCurrentProcessId();
+                    targetLabel = "self (game process)";
                 }
                 else
                 {
-                    log::WarnF("[gwheel:audio] per-process loopback failed for \"%s\" (pid=%u) — falling back to system loopback",
-                               cfg.music.processName.c_str(), pid);
+                    pid = FindProcessIdByName(cfg.music.processName);
+                    targetLabel = cfg.music.processName;
+                    if (pid == 0)
+                    {
+                        log::WarnF("[gwheel:audio] music.processName=\"%s\" not running — falling back to system loopback",
+                                   cfg.music.processName.c_str());
+                    }
+                }
+
+                if (pid != 0)
+                {
+                    if (OpenPerProcessLoopback(pid, &client, &mixFormat))
+                    {
+                        log::InfoF("[gwheel:audio] per-process loopback attached to %s (pid=%u, 44100 Hz 16-bit stereo)",
+                                   targetLabel.c_str(), pid);
+                        perProcess  = true;
+                        attachedPid = pid;
+                    }
+                    else
+                    {
+                        log::WarnF("[gwheel:audio] per-process loopback failed for %s (pid=%u) — falling back to system loopback",
+                                   targetLabel.c_str(), pid);
+                    }
                 }
             }
 
@@ -459,7 +709,6 @@ namespace gwheel::audio_monitor
                        mixFormat->nSamplesPerSec, mixFormat->nChannels, mixFormat->wFormatTag);
 
             // Design the bass-band bandpass once the sample rate is known.
-            // 80 Hz center, Q=0.7 → pass band ~55-115 Hz (-3 dB).
             g_bassFilter.DesignBandpass(
                 static_cast<float>(mixFormat->nSamplesPerSec), 80.f, 0.7f);
             g_bassFilterDesigned = true;
@@ -472,9 +721,75 @@ namespace gwheel::audio_monitor
             // Periodic level log counter. At 10ms chunks, 500 = 5 seconds.
             int logCounter = 0;
 
+            // Empty-tick run length. WASAPI per-process loopback stops
+            // emitting packets when the captured tree goes silent —
+            // GetNextPacketSize returns 0 indefinitely. We use this to
+            // (a) decay the envelope toward 0 so the bar doesn't freeze
+            // on the last value, (b) shrink the rolling window's stale
+            // peak, and (c) restart the stream entirely if the silence
+            // run gets long enough to suggest a dropped capture.
+            int emptyTicks = 0;
+            constexpr int kEmptyTicksDecay   = 50;   // 0.5 s → start decaying
+            constexpr int kEmptyTicksRestart = 500;  // 5.0 s → tear down + restart
+
+            // Per-app session volume compensation. Xbox Game Bar /
+            // Windows Volume Mixer adjusts ISimpleAudioVolume on the
+            // captured process's session, and per-process loopback
+            // sees audio AFTER that fader. The listener registered
+            // below pushes volume changes straight into g_volumeScalar
+            // synchronously when the user drags a slider — no polling,
+            // no per-tick rescan, single capture-tick latency.
+            // 1% cutoff. Below that the user is essentially muted and
+            // we'd amplify the digital noise floor 100×+ — no useful
+            // signal. Above 1% we always compensate so e.g. a 5%
+            // slider position keeps the bar pulsing on real music.
+            constexpr float kMinCompensationScalar = 0.01f;
+
+            SessionVolumeListener*               listener     = nullptr;
+            std::vector<IAudioSessionControl*>   hookedSessions;
+            if (perProcess && attachedPid != 0)
+            {
+                listener = new SessionVolumeListener();
+                AttachSessionVolumeListenersAll(attachedPid, listener, hookedSessions);
+                if (hookedSessions.empty())
+                {
+                    log::WarnF("[gwheel:audio] no session-volume listeners attached yet for pid=%u — will keep retrying via poll",
+                               attachedPid);
+                }
+                else
+                {
+                    log::InfoF("[gwheel:audio] session-volume listeners attached on %zu sessions (instant Game Bar slider compensation)",
+                               hookedSessions.size());
+                }
+            }
+
+            // Polling safety net. The event listeners give instant
+            // updates the moment a slider event reaches any of the
+            // hooked sessions, but CP2077 can spawn new sessions
+            // mid-game and we need to re-hook those plus catch any
+            // event that slipped through. 250 ms feels effectively
+            // instant to the user without burning CPU.
+            int pollCounter = 0;
+            constexpr int kPollTicks = 25;  // 0.25 s
+
             while (g_running.load(std::memory_order_acquire))
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+                if (perProcess && attachedPid != 0 && ++pollCounter >= kPollTicks)
+                {
+                    pollCounter = 0;
+                    // Authoritative re-read of the lowest-active
+                    // session volume. Also opportunistically hooks any
+                    // new sessions that have appeared since the last
+                    // pass (idempotent for already-hooked sessions).
+                    if (listener)
+                        AttachSessionVolumeListenersAll(attachedPid, listener, hookedSessions);
+                    else
+                        PollSessionVolume(attachedPid);
+                }
+
+                const float volumeScalar = g_volumeScalar.load(std::memory_order_acquire);
 
                 // Drain every packet available since the last tick.
                 double sumSq = 0.0;
@@ -504,9 +819,45 @@ namespace gwheel::audio_monitor
                     if (FAILED(ph)) break;
                 }
 
-                const float chunkRms = (totalFrames > 0)
+                float chunkRms = (totalFrames > 0)
                     ? static_cast<float>(std::sqrt(sumSq / static_cast<double>(totalFrames)))
                     : 0.f;
+
+                // Undo the per-app fader so the visualizer responds to
+                // the music's actual dynamics, not Game Bar's slider
+                // position. Skip compensation when volume is near zero
+                // (would amplify the noise floor by 20×+).
+                if (perProcess && volumeScalar >= kMinCompensationScalar)
+                    chunkRms /= volumeScalar;
+
+                // Track empty-tick runs so we can tell silence from a
+                // dropped stream. A tick counts as empty if no non-silent
+                // frames came back this round.
+                if (totalFrames == 0) ++emptyTicks;
+                else                  emptyTicks = 0;
+
+                // Stream-restart watchdog. If the loopback stops giving
+                // us packets for 5 seconds straight, the stream has
+                // effectively died (per-process loopback is known to do
+                // this on long silence). Tear down and re-Start so the
+                // next packet of audio actually reaches us.
+                if (emptyTicks >= kEmptyTicksRestart)
+                {
+                    log::Warn("[gwheel:audio] no packets for 5s — restarting capture stream");
+                    if (client) client->Stop();
+                    HRESULT rh = client ? client->Reset()  : E_FAIL;
+                    HRESULT sh = client ? client->Start()  : E_FAIL;
+                    if (FAILED(rh) || FAILED(sh))
+                    {
+                        log::WarnF("[gwheel:audio] capture restart failed (reset hr=0x%08lX, start hr=0x%08lX)", rh, sh);
+                        break;
+                    }
+                    g_bassFilter.Reset();
+                    smoothed = 0.f;
+                    rollingBuf.clear();
+                    emptyTicks = 0;
+                    continue;
+                }
 
                 // Asymmetric envelope.
                 const float alpha = (chunkRms > smoothed) ? kAttackAlpha : kReleaseAlpha;
@@ -528,6 +879,18 @@ namespace gwheel::audio_monitor
                 }
                 if (rollingBuf.empty()) rollingMin = 0.f;
 
+                // Long-silence peak decay. Once we've been idle for
+                // 0.5 s+ the rolling peak is stale — calibrated to a
+                // song that's no longer playing. Bleed it down so the
+                // first packet of a new song doesn't get crushed
+                // against the old loud peak (which would render as
+                // a stuck-dim bar for ~3 s until the window flushes).
+                if (emptyTicks >= kEmptyTicksDecay)
+                {
+                    const float decayPerTick = 0.985f;
+                    for (float& v : rollingBuf) v *= decayPerTick;
+                }
+
                 // Dynamic-range normalisation: stretch the recent
                 // window's quietest-to-loudest span across [0..1]. A
                 // tiny-range guard avoids amplifying the noise floor
@@ -546,12 +909,29 @@ namespace gwheel::audio_monitor
                 // so release logs stay quiet.
                 if (++logCounter >= 500 && log::DebugEnabled()) {
                     logCounter = 0;
-                    log::DebugF("[gwheel:audio] rms=%.5f smoothed=%.5f min=%.5f peak=%.5f range=%.5f level=%.2f",
-                                chunkRms, smoothed, rollingMin, rollingPeak, range, level);
+                    log::DebugF("[gwheel:audio] rms=%.5f smoothed=%.5f min=%.5f peak=%.5f range=%.5f vol=%.2f level=%.2f",
+                                chunkRms, smoothed, rollingMin, rollingPeak, range, volumeScalar, level);
                 }
             }
 
             log::Info("[gwheel:audio] WASAPI loopback stopping");
+
+            if (listener)
+            {
+                for (auto* s : hookedSessions)
+                {
+                    if (s)
+                    {
+                        s->UnregisterAudioSessionNotification(listener);
+                        s->Release();
+                    }
+                }
+                hookedSessions.clear();
+                listener->Release();
+                listener = nullptr;
+            }
+            g_volumeScalar.store(1.f, std::memory_order_release);
+
             cleanup();
         }
     }

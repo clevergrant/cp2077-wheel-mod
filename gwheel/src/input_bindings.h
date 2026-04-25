@@ -45,47 +45,86 @@ namespace gwheel::input_bindings
     // what's behind you) despite the historical name. It's a tap action;
     // holding the physical button does not hold MMB, because the game
     // treats held MMB as tag / weapon wheel which is not what we want.
+    // Order is grouped by category (driving / camera / combat / weapons /
+    // radio / gameplay / menus / menu-nav) for dropdown legibility — Mod
+    // Settings displays enum members in declaration order. Reordering this
+    // enum is a *breaking* change for users' persisted bindings: Mod
+    // Settings stores selections by integer value, so any reorder remaps
+    // every saved binding to whatever sits at its old position. Don't
+    // reorder casually. If you must, communicate it as a forced re-bind.
+    //
+    // RadioToggle and SirenToggle used to live as direct-method actions
+    // and were dropped: the radio-receiver toggle works but CP2077 doesn't
+    // sync the rev-strip / visualizer state to programmatic radio-state
+    // changes, and ToggleSiren returns success but the game's siren state
+    // machine ignores direct-method invocation. RadioNext (direct) stays
+    // because NextRadioReceiverStation is a clean audio-only event.
+    // ZoomIn / ZoomOut also used to live in this enum and were removed
+    // (their mouse-wheel dispatch was indistinguishable from NextWeapon /
+    // PrevWeapon under CP2077's input mapping).
     enum Action : int32_t
     {
         None = 0,
+
+        // --- Driving ----------------------------------------------------
         Horn,
         Headlights,
         Handbrake,
         Autodrive,
         ExitVehicle,
+        CallVehicle,
+
+        // --- Camera -----------------------------------------------------
         CameraCycleForward,
         CameraCycleBackward,
         CameraReset,
-        ZoomIn,
-        ZoomOut,
+
+        // --- Combat (shooting) ------------------------------------------
         ShootPrimary,
         ShootSecondary,
         ShootTertiary,
+
+        // --- Weapons (selection / cycling) ------------------------------
         NextWeapon,
         PrevWeapon,
         WeaponSlot1,
         WeaponSlot2,
         SwitchWeapons,
         HolsterWeapon,
+
+        // --- Radio ------------------------------------------------------
+        RadioMenu,
+        RadioNext,        // direct-method, CP2077-keybind-immune
+
+        // --- Gameplay misc ---------------------------------------------
+        UseConsumable,
+        IconicCyberware,
+        // `Tag` (MMB-tap, scan/mark in CP2077) used to live here and was
+        // removed: it shared MMB with CameraCycleBackward and routed
+        // through the same key the user often rebinds in CP2077, so it
+        // was rarely useful and frequently surprising. Append-only past
+        // this point still applies — Mod Settings persists by enum
+        // member name, so removed names fall back to the field default
+        // on next load.
+        QuickSave,
+
+        // --- Menus / fullscreen UI -------------------------------------
         OpenMap,
         OpenJournal,
         OpenInventory,
         OpenPhone,
         OpenPerks,
         OpenCrafting,
-        QuickSave,
-        RadioMenu,
-        UseConsumable,
-        IconicCyberware,
         Pause,
-        Tag,
-        CallVehicle,
+
+        // --- Menu navigation -------------------------------------------
         MenuConfirm,
         MenuCancel,
         MenuUp,
         MenuDown,
         MenuLeft,
         MenuRight,
+
         kActionCount
     };
 

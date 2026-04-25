@@ -139,6 +139,15 @@ namespace gwheel::rtti_offsets
         DumpClassProperties("vehicleWheeledPhysics");
         DumpClassProperties("vehiclePersistentDataPS");
         DumpClassProperties("vehicleWheelRuntimePSData");
+        // Camera / action discovery sweeps were here on 2026-04-24 to find
+        // direct-method callables for RearViewCamera / RadioMenu / Siren.
+        // Results captured in the build log; the only lasting use was
+        // wiring up `RadioNext` -> NextRadioReceiverStation. Sweep removed
+        // from the startup path because it produces ~5 KB of one-time
+        // output on every launch. The helpers (DumpClassesContaining /
+        // DumpFunctionsContaining / DumpClassFunctions) remain available
+        // in the header for ad-hoc reuse if we go hunting for more
+        // direct-action paths later.
         log::Info("[gwheel:rtti-off] ======== offset resolution complete ========");
 
         st.ready.store(true, std::memory_order_release);
@@ -396,5 +405,165 @@ namespace gwheel::rtti_offsets
             log::InfoF("[gwheel:rtti-off]   0x%04X  %s : %s",
                        p->valueOffset, name ? name : "?", typeName ? typeName : "?");
         }
+    }
+
+    namespace
+    {
+        // Lowercase ASCII compare-substring. Cheap, allocation-free.
+        bool ContainsCI(const char* haystack, const char* needle)
+        {
+            if (!haystack || !needle) return false;
+            for (const char* p = haystack; *p; ++p)
+            {
+                size_t i = 0;
+                while (needle[i] && p[i])
+                {
+                    char a = p[i], b = needle[i];
+                    if (a >= 'A' && a <= 'Z') a = static_cast<char>(a + 32);
+                    if (b >= 'A' && b <= 'Z') b = static_cast<char>(b + 32);
+                    if (a != b) break;
+                    ++i;
+                }
+                if (!needle[i]) return true;
+            }
+            return false;
+        }
+
+        // Format one function signature: name(arg0:T0, arg1:T1, ...) -> ret.
+        // Writes into `out` (size cap). Truncation OK — diagnostic only.
+        void FormatFunctionSig(const RED4ext::CBaseFunction* fn, char* out, size_t cap)
+        {
+            if (!fn || !out || cap == 0) return;
+            out[0] = '\0';
+            const char* nm = fn->fullName.ToString();
+            int written = std::snprintf(out, cap, "%s(", nm ? nm : "?");
+            const uint32_t nParams = fn->params.Size();
+            for (uint32_t i = 0; i < nParams; ++i)
+            {
+                auto* p = fn->params[i];
+                if (!p) continue;
+                const char* pn = p->name.ToString();
+                const char* pt = p->type ? p->type->GetName().ToString() : "?";
+                written += std::snprintf(out + written,
+                                         (static_cast<size_t>(written) < cap) ? cap - static_cast<size_t>(written) : 0,
+                                         "%s%s:%s",
+                                         (i ? ", " : ""), pn ? pn : "?", pt ? pt : "?");
+                if (static_cast<size_t>(written) + 1 >= cap) break;
+            }
+            const char* rt = (fn->returnType && fn->returnType->type)
+                                ? fn->returnType->type->GetName().ToString()
+                                : "void";
+            std::snprintf(out + written,
+                          (static_cast<size_t>(written) < cap) ? cap - static_cast<size_t>(written) : 0,
+                          ") -> %s", rt ? rt : "void");
+        }
+    }
+
+    void DumpClassFunctions(const char* className)
+    {
+        auto* rtti = RED4ext::CRTTISystem::Get();
+        if (!rtti || !className)
+        {
+            log::Warn("[gwheel:rtti-off] DumpClassFunctions: RTTI or class name unavailable");
+            return;
+        }
+
+        auto* cls = rtti->GetClass(RED4ext::CName(className));
+        if (!cls)
+        {
+            log::WarnF("[gwheel:rtti-off] DumpClassFunctions: class '%s' not found", className);
+            return;
+        }
+
+        const uint32_t fns = cls->funcs.Size();
+        const uint32_t sfs = cls->staticFuncs.Size();
+        log::InfoF("[gwheel:rtti-off] --- %s methods (%u instance, %u static) ---",
+                   className, fns, sfs);
+        char buf[1024];
+        for (uint32_t i = 0; i < fns; ++i)
+        {
+            auto* f = cls->funcs[i];
+            if (!f) continue;
+            FormatFunctionSig(f, buf, sizeof(buf));
+            log::InfoF("[gwheel:rtti-off]   inst %s", buf);
+        }
+        for (uint32_t i = 0; i < sfs; ++i)
+        {
+            auto* f = cls->staticFuncs[i];
+            if (!f) continue;
+            FormatFunctionSig(f, buf, sizeof(buf));
+            log::InfoF("[gwheel:rtti-off]   stat %s", buf);
+        }
+    }
+
+    void DumpClassesContaining(std::initializer_list<const char*> subs)
+    {
+        auto* rtti = RED4ext::CRTTISystem::Get();
+        if (!rtti)
+        {
+            log::Warn("[gwheel:rtti-off] DumpClassesContaining: RTTI unavailable");
+            return;
+        }
+
+        log::Info("[gwheel:rtti-off] === sweeping RTTI classes for substring matches ===");
+        RED4ext::DynArray<RED4ext::CClass*> classes;
+        rtti->GetClasses(nullptr, classes, nullptr, true);
+        const uint32_t n = classes.Size();
+        size_t hits = 0;
+        for (uint32_t i = 0; i < n; ++i)
+        {
+            auto* cls = classes[i];
+            if (!cls) continue;
+            const char* nm = cls->GetName().ToString();
+            if (!nm) continue;
+            for (const char* s : subs)
+            {
+                if (ContainsCI(nm, s))
+                {
+                    log::InfoF("[gwheel:rtti-off]   class %s (size=0x%X, props=%u, funcs=%u)",
+                               nm, cls->size, cls->props.Size(), cls->funcs.Size());
+                    ++hits;
+                    break;
+                }
+            }
+        }
+        log::InfoF("[gwheel:rtti-off] === sweep complete (%zu matches across %u classes) ===",
+                   hits, n);
+    }
+
+    void DumpFunctionsContaining(std::initializer_list<const char*> subs)
+    {
+        auto* rtti = RED4ext::CRTTISystem::Get();
+        if (!rtti)
+        {
+            log::Warn("[gwheel:rtti-off] DumpFunctionsContaining: RTTI unavailable");
+            return;
+        }
+
+        log::Info("[gwheel:rtti-off] === sweeping RTTI methods for substring matches ===");
+        RED4ext::DynArray<RED4ext::CBaseFunction*> fns;
+        rtti->GetClassFunctions(fns);
+        const uint32_t n = fns.Size();
+        size_t hits = 0;
+        char buf[1024];
+        for (uint32_t i = 0; i < n; ++i)
+        {
+            auto* f = fns[i];
+            if (!f) continue;
+            const char* fn = f->fullName.ToString();
+            if (!fn) continue;
+            for (const char* s : subs)
+            {
+                if (ContainsCI(fn, s))
+                {
+                    FormatFunctionSig(f, buf, sizeof(buf));
+                    log::InfoF("[gwheel:rtti-off]   %s", buf);
+                    ++hits;
+                    break;
+                }
+            }
+        }
+        log::InfoF("[gwheel:rtti-off] === function sweep complete (%zu matches across %u methods) ===",
+                   hits, n);
     }
 }

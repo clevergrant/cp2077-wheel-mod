@@ -66,13 +66,23 @@ public func GWheelAttach() -> Void {
     return;
   }
 
-  // Seed initial values. Radio state comes from the native
-  // IsRadioReceiverActive() rather than the Blackboard field because
-  // the Blackboard can lag a frame or two after mount / save-load;
-  // the native method queries the live radio component.
+  // Seed initial values. For radio we OR two sources because either
+  // can momentarily disagree with reality on save-load:
+  //   - The native IsRadioReceiverActive() can return false for a
+  //     beat after attach while the radio component is still spinning
+  //     up (the symptom: load-into-car-with-radio-on shows rev strip
+  //     instead of music viz until the user toggles off/on).
+  //   - The Blackboard field VehRadioState reflects the saved state
+  //     immediately but the listener we register below only fires on
+  //     CHANGES, so a true-at-load value would never be delivered.
+  // OR-ing them ensures we pick up "radio is on" from whichever
+  // source already knows it. Subsequent state changes still flow
+  // through the listener registered just below.
   let initialRpm: Float = bb.GetFloat(GetAllBlackboardDefs().Vehicle.RPMValue);
   GWheel_SetEngineRpmNormalized(initialRpm / this.m_gwheelRpmMax);
-  GWheel_SetRadioActive(vehicle.IsRadioReceiverActive());
+  let radioOn: Bool = vehicle.IsRadioReceiverActive()
+                      || bb.GetBool(GetAllBlackboardDefs().Vehicle.VehRadioState);
+  GWheel_SetRadioActive(radioOn);
 
   // Subscribe to change events.
   this.m_gwheelRpmBbId = bb.RegisterListenerFloat(
@@ -85,6 +95,55 @@ public func GWheelAttach() -> Void {
   // wrappers in gwheel_mount.reds. Save-load-in-vehicle skips those,
   // so explicitly assert the cached pointer here as a safety net.
   GWheel_SetPlayerVehicle(vehicle);
+
+  // Save-load-with-radio-on recovery. At this exact moment both the
+  // native IsRadioReceiverActive() and the Blackboard's VehRadioState
+  // can read false because the radio component hasn't fully spun up
+  // yet — the false→true transition that follows happens before our
+  // listener (registered just above) fires for the first time, so we
+  // never get notified of the saved state. Schedule a few delayed
+  // re-reads to catch the radio after it settles. Cheap to do
+  // unconditionally; the LED controller already gates on
+  // visualizerWhileMusic so a false reading is a no-op.
+  let delaySys: ref<DelaySystem> = GameInstance.GetDelaySystem(vehicle.GetGame());
+  if IsDefined(delaySys) {
+    delaySys.DelayCallback(GWheelRadioReseedCallback.Create(this), 0.5);
+    delaySys.DelayCallback(GWheelRadioReseedCallback.Create(this), 1.5);
+    delaySys.DelayCallback(GWheelRadioReseedCallback.Create(this), 3.0);
+  }
+}
+
+// Re-seeds radio state from whichever source has the truth right
+// now. Run via DelayCallback at progressively later offsets after
+// GWheelAttach to bridge the post-load gap before the radio
+// component finishes spinning up. Idempotent — if the listener has
+// already pushed a fresh state, this just confirms it.
+@addMethod(VehicleComponent)
+public func GWheelReseedRadio() -> Void {
+  let vehicle: ref<VehicleObject> = this.GetVehicle();
+  if !IsDefined(vehicle) { return; }
+  let bb: ref<IBlackboard> = vehicle.GetBlackboard();
+  if !IsDefined(bb) { return; }
+  let radioOn: Bool = vehicle.IsRadioReceiverActive()
+                      || bb.GetBool(GetAllBlackboardDefs().Vehicle.VehRadioState);
+  GWheel_SetRadioActive(radioOn);
+}
+
+public class GWheelRadioReseedCallback extends DelayCallback {
+  private let vc: wref<VehicleComponent>;
+
+  public static func Create(v: ref<VehicleComponent>) -> ref<GWheelRadioReseedCallback> {
+    let cb = new GWheelRadioReseedCallback();
+    cb.vc = v;
+    return cb;
+  }
+
+  public func Call() -> Void {
+    let v = this.vc;
+    if IsDefined(v) {
+      v.GWheelReseedRadio();
+    }
+  }
 }
 
 // Tear down listeners + clear plugin state. Idempotent.

@@ -820,6 +820,11 @@ namespace gwheel::vehicle_hook
         return p != nullptr && g_playerVehicle.load(std::memory_order_acquire) == p;
     }
 
+    void* GetPlayerVehicle()
+    {
+        return g_playerVehicle.load(std::memory_order_acquire);
+    }
+
     void OnPersistentStateSample(void* psPointer)
     {
         if (!psPointer) return;

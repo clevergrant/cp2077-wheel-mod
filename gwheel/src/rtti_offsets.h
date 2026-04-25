@@ -2,6 +2,8 @@
 
 // Self-discovering struct offsets via the game's own RTTI system.
 //
+// (Header includes std::initializer_list for the dump helpers below.)
+//
 // CP2077's scripting RTTI registers every script-visible field on every
 // script-visible class as a CProperty with a valueOffset. Instead of
 // hardcoding offsets (which drift between patches and across SDK forks),
@@ -14,6 +16,7 @@
 // to whatever behaviour makes sense when the signal is unavailable.
 
 #include <cstdint>
+#include <initializer_list>
 
 namespace gwheel::rtti_offsets
 {
@@ -45,6 +48,23 @@ namespace gwheel::rtti_offsets
     // with the resolved offset + type. Useful on first-vehicle encounter to
     // discover what's actually exposed on the current build.
     void DumpClassProperties(const char* className);
+
+    // Dump the full method (function) list of a class to the log, one line
+    // per method, with name + parameter / return types. Used to discover
+    // direct-invoke entry points that bypass the keyboard layer (e.g. an
+    // "OnVehicleReverseCam" callback we can call by RTTI name).
+    void DumpClassFunctions(const char* className);
+
+    // Sweep the global RTTI namespace and log every class whose name
+    // contains *any* of the given case-insensitive substrings. For each
+    // match, log the class name + size. Used to discover camera-related
+    // and input-action-related classes whose names we don't already know.
+    void DumpClassesContaining(std::initializer_list<const char*> substrings);
+
+    // Sweep the global RTTI namespace and log every *function* (method on
+    // any class) whose name contains any of the given substrings. Catches
+    // OnVehicleReverseCam-style handlers we couldn't find via class lookup.
+    void DumpFunctionsContaining(std::initializer_list<const char*> substrings);
 
     // --- Runtime struct-offset probe ---------------------------------------
     //

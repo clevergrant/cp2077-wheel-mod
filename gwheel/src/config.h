@@ -75,12 +75,16 @@ namespace gwheel::config
     struct Music
     {
         // Target process name for per-process audio capture. Empty =
-        // capture the system default render endpoint (everything the
-        // system mixes — game audio included). Non-empty = try to
-        // attach per-process loopback to just this process's audio
-        // tree so the visualizer only reacts to e.g. Spotify and
-        // ignores CP2077's own SFX/radio.
+        // capture the game's own process tree (gwheel.dll lives
+        // inside Cyberpunk2077.exe, so we use GetCurrentProcessId).
+        // This isolates the visualizer to just the game's audio
+        // (radio + engine + SFX) and rejects anything else on the
+        // system — Spotify tabs, Discord, browser audio — that
+        // otherwise contaminated the system-wide loopback.
         //
+        // Non-empty = an advanced override that points the loopback
+        // at some OTHER app instead, for setups where the user runs
+        // a separate music source alongside the game.
         // Examples: "Spotify.exe", "firefox.exe", "chrome.exe".
         // Case-insensitive match on the executable filename. If the
         // named process isn't running when the plugin starts, we

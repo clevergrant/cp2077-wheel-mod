@@ -96,18 +96,20 @@ public class GWheelSettings extends IScriptable {
 
   // ---- Button bindings (all user-assignable) -----------------------------
   //
-  // D-pad + A/B/X/Y bindings apply WHILE DRIVING. When any fullscreen
-  // menu is open (pause, map, inventory, etc.), the plugin overrides
-  // these 8 with hardcoded gamepad-nav (D-pad = arrow keys, A = Enter,
-  // B = Escape, X/Y = nothing) so the wheel navigates menus like a
-  // controller.
+  // Every binding here is user-controlled, with no hidden overrides. The
+  // D-pad + A defaults are Menu-nav (Up/Down/Left/Right arrow keys and
+  // Enter) so the wheel navigates pause/map/inventory menus like a
+  // controller out of the box. If you'd rather those wheel controls stay
+  // inert while driving, set them to None — CP2077's arrow keys are
+  // secondary vehicle controls (Up/Down = accelerate/decelerate, Left/Right
+  // = steer), so binding the D-pad to Menu-nav and then pressing the D-pad
+  // while driving will nudge the car.
   //
   // IMPORTANT: clear the D-pad and A/B/X/Y keyboard bindings in G HUB's
   // Cyberpunk profile. Otherwise G HUB + plugin both fire keyboard
   // events and you'll get doubled keypresses. Other controls (paddles,
   // +/-, scroll click, etc.) can still be bound in G HUB if you want,
-  // but the plugin's in-vehicle bindings below are the recommended
-  // source of truth.
+  // but the plugin's bindings below are the recommended source of truth.
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.category", "Button Bindings")
@@ -121,28 +123,28 @@ public class GWheelSettings extends IScriptable {
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.category", "Button Bindings")
-  @runtimeProperty("ModSettings.displayName", "D-pad Up (in-vehicle)")
-  let bindDpadUp: GWheelAction = GWheelAction.None;
+  @runtimeProperty("ModSettings.displayName", "D-pad Up")
+  let bindDpadUp: GWheelAction = GWheelAction.MenuUp;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.category", "Button Bindings")
-  @runtimeProperty("ModSettings.displayName", "D-pad Down (in-vehicle)")
-  let bindDpadDown: GWheelAction = GWheelAction.None;
+  @runtimeProperty("ModSettings.displayName", "D-pad Down")
+  let bindDpadDown: GWheelAction = GWheelAction.MenuDown;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.category", "Button Bindings")
-  @runtimeProperty("ModSettings.displayName", "D-pad Left (in-vehicle)")
-  let bindDpadLeft: GWheelAction = GWheelAction.None;
+  @runtimeProperty("ModSettings.displayName", "D-pad Left")
+  let bindDpadLeft: GWheelAction = GWheelAction.MenuLeft;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.category", "Button Bindings")
-  @runtimeProperty("ModSettings.displayName", "D-pad Right (in-vehicle)")
-  let bindDpadRight: GWheelAction = GWheelAction.None;
+  @runtimeProperty("ModSettings.displayName", "D-pad Right")
+  let bindDpadRight: GWheelAction = GWheelAction.MenuRight;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.category", "Button Bindings")
-  @runtimeProperty("ModSettings.displayName", "A button (in-vehicle)")
-  let bindButtonA: GWheelAction = GWheelAction.None;
+  @runtimeProperty("ModSettings.displayName", "A button")
+  let bindButtonA: GWheelAction = GWheelAction.MenuConfirm;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.category", "Button Bindings")
@@ -259,46 +261,71 @@ public class GWheelSettings extends IScriptable {
 
 // Actions the plugin knows how to dispatch. Indices must match the Action
 // enum in gwheel/src/input_bindings.h — same values, same order.
+// Grouped by category (driving / camera / combat / weapons / radio /
+// gameplay / menus / menu-nav) so Mod Settings' scroll-list shows similar
+// actions adjacent. MUST stay in lockstep with the C++ `Action` enum in
+// gwheel/src/input_bindings.h — same names, same integer values, same
+// order. Mod Settings persists each binding by integer value, so any
+// reorder shifts users' saved bindings (one-time forced re-bind).
+//
+// `RearViewCamera` is the redscript-side spelling of CameraCycleBackward;
+// the dropdown label inherits the redscript identifier so we use the
+// gameplay-meaningful name here even though the C++ side keeps the older
+// "Backward" naming for historical reasons.
 enum GWheelAction {
   None = 0,
+
+  // Driving
   Horn = 1,
   Headlights = 2,
   Handbrake = 3,
   Autodrive = 4,
   ExitVehicle = 5,
-  CameraCycleForward = 6,
-  RearViewCamera = 7,
-  CameraReset = 8,
-  ZoomIn = 9,
-  ZoomOut = 10,
-  ShootPrimary = 11,
-  ShootSecondary = 12,
-  ShootTertiary = 13,
-  NextWeapon = 14,
-  PrevWeapon = 15,
-  WeaponSlot1 = 16,
-  WeaponSlot2 = 17,
-  SwitchWeapons = 18,
-  HolsterWeapon = 19,
-  OpenMap = 20,
-  OpenJournal = 21,
-  OpenInventory = 22,
-  OpenPhone = 23,
-  OpenPerks = 24,
-  OpenCrafting = 25,
-  QuickSave = 26,
-  RadioMenu = 27,
-  UseConsumable = 28,
-  IconicCyberware = 29,
+  CallVehicle = 6,
+
+  // Camera
+  CameraCycleForward = 7,
+  RearViewCamera = 8,
+  CameraReset = 9,
+
+  // Combat
+  ShootPrimary = 10,
+  ShootSecondary = 11,
+  ShootTertiary = 12,
+
+  // Weapons
+  NextWeapon = 13,
+  PrevWeapon = 14,
+  WeaponSlot1 = 15,
+  WeaponSlot2 = 16,
+  SwitchWeapons = 17,
+  HolsterWeapon = 18,
+
+  // Radio
+  RadioMenu = 19,
+  RadioNext = 20,
+
+  // Gameplay misc
+  UseConsumable = 21,
+  IconicCyberware = 22,
+  QuickSave = 23,
+
+  // Menus
+  OpenMap = 24,
+  OpenJournal = 25,
+  OpenInventory = 26,
+  OpenPhone = 27,
+  OpenPerks = 28,
+  OpenCrafting = 29,
   Pause = 30,
-  Tag = 31,
-  CallVehicle = 32,
-  MenuConfirm = 33,
-  MenuCancel = 34,
-  MenuUp = 35,
-  MenuDown = 36,
-  MenuLeft = 37,
-  MenuRight = 38,
+
+  // Menu navigation
+  MenuConfirm = 31,
+  MenuCancel = 32,
+  MenuUp = 33,
+  MenuDown = 34,
+  MenuLeft = 35,
+  MenuRight = 36,
 }
 
 // Attach our settings instance to the player puppet so it lives for the
