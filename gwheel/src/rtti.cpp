@@ -314,13 +314,6 @@ namespace gwheel::rtti
             if (aOut) *aOut = true;
         }
 
-        // -------- Menu-state tracking ---------------------------------------
-        //
-        // Tells the plugin whether any gameplay-blocking menu is showing,
-        // so it can override D-pad + ABXY with gamepad-nav actions. Driven
-        // by a redscript IsPausedState polling loop (gwheel_menu.reds).
-
-
         // -------- Registration ----------------------------------------------
 
         using FuncFlags = RED4ext::CBaseFunction::Flags;

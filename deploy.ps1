@@ -84,6 +84,17 @@ foreach ($f in $fomodConfigFiles) {
   if (-not (Test-Path $f)) { Fail "Missing FOMOD config fragment: $f" }
 }
 
+# Patched mod_settings.dll fork (vendor/mod_settings/) — adds the
+# `ModSettings.hidden` runtime property so capability flags can be
+# registered as dependency targets without showing up as user-visible
+# toggles. API-compatible with upstream jackhumbert/mod_settings v0.2.21.
+# Ships in BOTH zip mode (alongside gwheel.dll, into the same FOMOD) and
+# direct mode (overwrites the user's mod_settings.dll in place).
+$patchedModSettingsDll = Join-Path $repoRoot "vendor\mod_settings\build\Release\mod_settings.dll"
+if (-not (Test-Path $patchedModSettingsDll)) {
+  Fail "Patched mod_settings.dll missing at $patchedModSettingsDll. Build it from vendor/mod_settings/ before deploying."
+}
+
 # ---------- build (if needed) ----------------------------------------------
 
 $dllPath = Join-Path $BuildDir "gwheel\$Config\gwheel.dll"
@@ -180,22 +191,17 @@ if ($Game) {
   Copy-Item -Force $dllPath (Join-Path $pluginDir "gwheel.dll")
   Info "Deployed DLL -> $(Join-Path $pluginDir 'gwheel.dll')"
 
-  # Patched mod_settings DLL: vendored fork at vendor/mod_settings/, adds the
-  # `ModSettings.hidden` runtime property so we can register capability flags
-  # as dependency targets without rendering them as user-visible toggles.
-  # API-compatible with upstream — other mods using mod_settings keep working.
-  $patchedModSettingsDll = Join-Path $repoRoot "vendor\mod_settings\build\Release\mod_settings.dll"
-  if (Test-Path $patchedModSettingsDll) {
-    $modSettingsTarget = Join-Path $Game "red4ext\plugins\mod_settings\mod_settings.dll"
-    $modSettingsDir    = Split-Path $modSettingsTarget -Parent
-    if (-not (Test-Path $modSettingsDir)) {
-      Warn "mod_settings folder doesn't exist at $modSettingsDir - install jackhumbert/mod_settings first, then re-run."
-    } else {
-      Copy-Item -Force $patchedModSettingsDll $modSettingsTarget
-      Info "Deployed patched mod_settings.dll -> $modSettingsTarget"
-    }
+  # Patched mod_settings DLL: $patchedModSettingsDll resolved + existence-checked
+  # in pre-flight above. Overwrite the user's existing mod_settings.dll in place;
+  # the patch is API-compatible with upstream so other mods using mod_settings
+  # keep working.
+  $modSettingsTarget = Join-Path $Game "red4ext\plugins\mod_settings\mod_settings.dll"
+  $modSettingsDir    = Split-Path $modSettingsTarget -Parent
+  if (-not (Test-Path $modSettingsDir)) {
+    Warn "mod_settings folder doesn't exist at $modSettingsDir - install jackhumbert/mod_settings first, then re-run."
   } else {
-    Warn "Patched mod_settings.dll not found at $patchedModSettingsDll - build it from vendor/mod_settings/ first."
+    Copy-Item -Force $patchedModSettingsDll $modSettingsTarget
+    Info "Deployed patched mod_settings.dll -> $modSettingsTarget"
   }
 
   # Logitech Gaming Software / G HUB runtime check. The Logitech SDK the DLL
@@ -296,8 +302,10 @@ New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "build")       
 New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "fomod")         | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "fomod_configs") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "gwheel_reds")   | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "mod_settings")  | Out-Null
 
 Copy-Item -Force $dllPath                          (Join-Path $stagingDir "build\gwheel.dll")
+Copy-Item -Force $patchedModSettingsDll            (Join-Path $stagingDir "mod_settings\mod_settings.dll")
 Copy-Item -Force "fomod\info.xml"                  (Join-Path $stagingDir "fomod\info.xml")
 Copy-Item -Force "fomod\ModuleConfig.xml"          (Join-Path $stagingDir "fomod\ModuleConfig.xml")
 foreach ($c in $fomodConfigFiles) {

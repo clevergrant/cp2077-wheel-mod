@@ -41,7 +41,7 @@ Logitech G-series wheel ──USB HID──▶ Logitech Steering Wheel SDK (via 
 | `gwheel/src/device_table.{h,cpp}` | Logitech G-series VID/PID table. |
 | `gwheel/src/wheel.{h,cpp}` | Logitech SDK wrapper: init, `Pump`, `Snapshot` (steer/throttle/brake/clutch/buttons/POV), and FFB dispatch (`PlayConstant`/`PlayDamper`/`PlaySpring` + global strength). |
 | `gwheel/src/sources.{h,cpp}` | Hardware-agnostic publish/read seam. `sources::Frame` = axes + digital + connected. Also carries `InVehicle()` control context (set by reds mount wrappers). |
-| `gwheel/src/input_bindings.{h,cpp}` | Physical-input enum, per-device layout, edge detection, `SendInput` dispatch. Entry point: `OnTick(const sources::Frame&)`. Menu-state override for D-pad / A-B-X-Y. |
+| `gwheel/src/input_bindings.{h,cpp}` | Physical-input enum, per-device layout, edge detection, `SendInput` dispatch. Entry point: `OnTick(const sources::Frame&)`. Every input falls through to the user's Mod Settings binding; menu-nav is the default for D-pad + A but is user-overridable. |
 | `gwheel/src/vehicle_hook.{h,cpp}` | RED4ext hash-resolved detour on `vehicle::BaseObject::UpdateVehicleCameraInput`. Gated on a cached player-vehicle pointer so we don't remote-drive parked cars. |
 | `gwheel/src/kbd_hook.{h,cpp}` | Low-level `WH_KEYBOARD_LL` hook that suppresses G HUB's synthetic vehicle-key presses while on foot. Our own `SendInput` events tag `dwExtraInfo = kExtraInfoTag` ('gWHL') so the hook passes them through. |
 | `gwheel/src/config.{h,cpp}` | Config struct, `Load()`, `ReadAsJson()`, per-field setters. Atomic double-buffered snapshot; every setter writes back to disk. |
@@ -50,7 +50,9 @@ Logitech G-series wheel ──USB HID──▶ Logitech Steering Wheel SDK (via 
 | `gwheel_reds/gwheel_natives.reds` | Declarations only — kept in lockstep with `rtti.cpp::PostRegisterTypes`. |
 | `gwheel_reds/gwheel_settings.reds` | `GWheelSettings` Mod Settings class + `GWheelAction` enum; pushes values to plugin on every change. |
 | `gwheel_reds/gwheel_mount.reds` | Wraps `VehicleComponent::OnVehicleFinishedMountingEvent` / `OnUnmountingEvent`; notifies plugin of the player's current vehicle pointer. |
-| `gwheel_reds/gwheel_menu.reds` | Wraps `OnInitialize` / `OnUninitialize` of `gameuiInGameMenuGameController` + `SingleplayerMenuGameController`; each open/close pushes a named tag via `GWheel_MenuOpen` / `GWheel_MenuClose` so the plugin can track which menus are currently up. |
+| `gwheel_reds/gwheel_events.reds` | Wraps `VehicleObject::OnVehicleBumpEvent`; queues a transient FFB jolt (in player-frame world-right) on collision. |
+| `gwheel_reds/gwheel_surface.reds` | 20 Hz downward raycast from chassis; pushes ground material CName transitions to the plugin (FFB mapping currently dormant). |
+| `gwheel_reds/gwheel_vehicle_signals.reds` | Subscribes to vehicle Blackboard for RPMValue + VehRadioState; pushes normalized RPM and radio state to the plugin so the LED rev-strip / music-visualizer reflect real game state. |
 
 ## Supported hardware (device_table)
 
@@ -183,10 +185,6 @@ Each setter atomically swaps the live snapshot and writes `config.json` to disk.
 | `GWheel_SetPlayerVehicle` | `v: ref<VehicleObject>` | Cache on mount (also sets `sources::InVehicle(true)`). |
 | `GWheel_ClearPlayerVehicle` | — | Clear on dismount (also `sources::InVehicle(false)`). |
 
-### Planned (not yet registered)
-
-The current `gwheel_menu.reds` calls `GWheel_MenuOpen(tag: String)` and `GWheel_MenuClose(tag: String)` on menu controller lifecycle events. The matching C++ registration is not in `rtti.cpp` yet — the reds side is ahead of the plugin. Once the plugin implements the tag-set tracker, the menu-nav override (D-pad / A-B-X-Y → arrow keys / Enter / Escape while any tag is active) will engage.
-
 ## Config JSON schema
 
 Path: `<CP2077>/red4ext/plugins/gwheel/config.json`. Loaded at plugin load, written back on every setter, saved on unload.
@@ -267,7 +265,7 @@ Dispatch lifecycle each pump tick (`input_bindings::OnTick`):
 3. If an edge fired, `Dispatch(bindings[input], rising)`:
    - Suppress if the action is `VehicleOnly` and `sources::InVehicle()` is false.
    - Otherwise `SendInput` with `dwExtraInfo = kbd_hook::kExtraInfoTag` so our own LL keyboard hook doesn't filter the event.
-4. While any menu tag is active (tracked as a set; see `gwheel_menu.reds` for the current candidate controllers), D-pad + A/B/X/Y get a **hardcoded** override — arrow keys / Enter / Escape — regardless of the user's binding, so the wheel navigates menus like a controller. The tag-set approach absorbs duplicate open/close fires from overlapping base+derived class wraps.
+4. There is no menu-state-aware override. An earlier design hard-overrode D-pad + A/B/X/Y to arrow keys / Enter / Escape while any menu was open, but CP2077's arrow keys are secondary vehicle controls (Up/Down = accelerate/decelerate, Left/Right = steer), so the override drove the car when the user pressed the D-pad even with binding=None. Menu nav is now just the user-visible default for D-pad + A in `gwheel_settings.reds`; the user can rebind to None to fully disable.
 
 ## FFB effect model
 

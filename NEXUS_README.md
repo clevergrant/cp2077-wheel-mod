@@ -40,8 +40,9 @@ Install these first, in this order:
 
 Drop the downloaded ZIP on Vortex. The FOMOD prompts you to confirm RED4ext, ArchiveXL, and Mod Settings are present, and installs:
 
-- `<CP2077>/red4ext/plugins/gwheel/gwheel.dll`
-- Four `.reds` files under `<CP2077>/r6/scripts/gwheel/`: `gwheel_natives.reds`, `gwheel_settings.reds`, `gwheel_mount.reds`, `gwheel_menu.reds`.
+- `<CP2077>/red4ext/plugins/gwheel/gwheel.dll` and `config.json`
+- A patched build of Mod Settings at `<CP2077>/red4ext/plugins/mod_settings/mod_settings.dll` (API-compatible with upstream; required for the in-game Settings page to hide hardware-capability flags from the UI).
+- Six `.reds` files under `<CP2077>/r6/scripts/gwheel/`: `gwheel_natives.reds`, `gwheel_settings.reds`, `gwheel_mount.reds`, `gwheel_events.reds`, `gwheel_surface.reds`, `gwheel_vehicle_signals.reds`.
 
 ## Compatibility note: RED4ext address database
 

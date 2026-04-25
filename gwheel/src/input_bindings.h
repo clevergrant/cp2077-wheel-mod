@@ -151,8 +151,8 @@ namespace gwheel::input_bindings
     // Called once per pump tick with the latest input frame. Detects
     // rising/falling edges on all physical inputs, dispatches bound actions
     // via SendInput. Gated internally on config.input.enabled. Uses the
-    // menu-active + in-vehicle context from sources to decide which
-    // actions to dispatch.
+    // in-vehicle context from sources to suppress vehicle-only actions
+    // when V is on foot.
     void OnTick(const sources::Frame& frame);
 
 }

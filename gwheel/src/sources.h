@@ -46,9 +46,7 @@ namespace gwheel::sources
     //
     // Context is consulted by input_bindings::Dispatch to decide whether
     // a vehicle-centric action should fire (suppressed on-foot, since the
-    // bound keyboard keys mean different things when V is walking) and by
-    // the edge-detect loop to decide whether to apply the menu-nav
-    // override for D-pad / ABXY.
+    // bound keyboard keys mean different things when V is walking).
 
     // Flipped by the redscript mount/unmount wrappers via
     // GWheel_Set/ClearPlayerVehicle; nullptr = not in a vehicle.
