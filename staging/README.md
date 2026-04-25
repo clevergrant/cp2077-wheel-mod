@@ -57,10 +57,14 @@ Extract the release ZIP into your Cyberpunk 2077 install directory. The expected
 
 ```text
 <CP2077>/red4ext/plugins/gwheel/gwheel.dll
+<CP2077>/red4ext/plugins/gwheel/config.json
+<CP2077>/red4ext/plugins/mod_settings/mod_settings.dll   (patched fork; see Configuration)
 <CP2077>/r6/scripts/gwheel/gwheel_natives.reds
 <CP2077>/r6/scripts/gwheel/gwheel_settings.reds
 <CP2077>/r6/scripts/gwheel/gwheel_mount.reds
-<CP2077>/r6/scripts/gwheel/gwheel_menu.reds
+<CP2077>/r6/scripts/gwheel/gwheel_events.reds
+<CP2077>/r6/scripts/gwheel/gwheel_surface.reds
+<CP2077>/r6/scripts/gwheel/gwheel_vehicle_signals.reds
 ```
 
 ## First run

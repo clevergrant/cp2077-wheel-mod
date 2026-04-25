@@ -14,6 +14,8 @@
   <requiredInstallFiles>
     <file source="build\gwheel.dll"
           destination="red4ext\plugins\gwheel\gwheel.dll"/>
+    <file source="mod_settings\mod_settings.dll"
+          destination="red4ext\plugins\mod_settings\mod_settings.dll"/>
     <file source="gwheel_reds\gwheel_natives.reds"
           destination="r6\scripts\gwheel\gwheel_natives.reds"/>
     <file source="gwheel_reds\gwheel_settings.reds"
@@ -24,6 +26,8 @@
           destination="r6\scripts\gwheel\gwheel_events.reds"/>
     <file source="gwheel_reds\gwheel_surface.reds"
           destination="r6\scripts\gwheel\gwheel_surface.reds"/>
+    <file source="gwheel_reds\gwheel_vehicle_signals.reds"
+          destination="r6\scripts\gwheel\gwheel_vehicle_signals.reds"/>
   </requiredInstallFiles>
 
   <installSteps order="Explicit">
