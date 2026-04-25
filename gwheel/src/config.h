@@ -17,7 +17,7 @@ namespace gwheel::config
     struct Ffb
     {
         bool    enabled = true;
-        bool    debugLogging = true;
+        bool    debugLogging = false;
 
         // Wheel torque, pushed to G HUB via LogiSetPreferredControllerProperties
         // (overallGain). When "Apply Settings from Game" is checked in G HUB

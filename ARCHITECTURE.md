@@ -4,7 +4,7 @@ This document is the contract the rest of the implementation is built against. I
 
 ## One-line summary
 
-A Cyberpunk 2077 RED4ext plugin that reads a Logitech G-series wheel via the official Logitech Steering Wheel SDK, injects its axes into the game through a hash-resolved detour on `vehicle::BaseObject::UpdateVehicleCameraInput`, dispatches wheel-button presses to in-game actions via `SendInput`, drives force-feedback effects back out, and exposes a flat set of global native functions that four `.reds` files use to render a Settings page via [Mod Settings](https://github.com/jackhumbert/mod_settings) and to track player-vehicle / menu lifecycle.
+A Cyberpunk 2077 RED4ext plugin that reads a Logitech G-series wheel via the official Logitech Steering Wheel SDK, injects its axes into the game through a hash-resolved detour on `vehicle::BaseObject::UpdateVehicleCameraInput`, dispatches wheel-button presses to in-game actions via `SendInput`, drives physics-aware force-feedback effects back out (centering, cornering, surface texture, collision jolts, slip-angle countersteer), reflects engine RPM and radio state on the wheel's rev-strip LEDs, and exposes a flat set of global native functions that six `.reds` files use to render a Settings page via [Mod Settings](https://github.com/jackhumbert/mod_settings), publish player-vehicle / RPM / radio state, and react to collision events.
 
 ## Components
 
@@ -45,7 +45,8 @@ Logitech G-series wheel ──USB HID──▶ Logitech Steering Wheel SDK (via 
 | `gwheel/src/vehicle_hook.{h,cpp}` | RED4ext hash-resolved detour on `vehicle::BaseObject::UpdateVehicleCameraInput`. Gated on a cached player-vehicle pointer so we don't remote-drive parked cars. |
 | `gwheel/src/kbd_hook.{h,cpp}` | Low-level `WH_KEYBOARD_LL` hook that suppresses G HUB's synthetic vehicle-key presses while on foot. Our own `SendInput` events tag `dwExtraInfo = kExtraInfoTag` ('gWHL') so the hook passes them through. |
 | `gwheel/src/config.{h,cpp}` | Config struct, `Load()`, `ReadAsJson()`, per-field setters. Atomic double-buffered snapshot; every setter writes back to disk. |
-| `gwheel/src/rtti.{h,cpp}` | Registers 19 global native functions exposed to redscript in `PostRegisterTypes`. |
+| `gwheel/src/rtti.{h,cpp}` | Registers 28 global native functions exposed to redscript in `PostRegisterTypes`. |
+| `gwheel/src/mod_settings_seed.cpp` | Writes hardware-capability flags to `red4ext/plugins/mod_settings/user.ini` at plugin load, before Mod Settings reads it, so the in-game Settings page hides sections for hardware the wheel doesn't have. |
 | `gwheel/src/rtti_dump.{h,cpp}` | Debug-only RTTI dumper (disabled this build during a bisect). |
 | `gwheel_reds/gwheel_natives.reds` | Declarations only — kept in lockstep with `rtti.cpp::PostRegisterTypes`. |
 | `gwheel_reds/gwheel_settings.reds` | `GWheelSettings` Mod Settings class + `GWheelAction` enum; pushes values to plugin on every change. |
@@ -133,7 +134,7 @@ Re-probe if the game patches the `vehicle::BaseObject` struct. The detour also m
 
 ## Native function surface (RTTI)
 
-Registered as global static native functions (not a class; no `IScriptable` parent) in [rtti.cpp:170-243](gwheel/src/rtti.cpp#L170-L243) via `RED4ext::CGlobalFunction::Create(name, name, fn)` + `AddParam` + `SetReturnType` + `rtti->RegisterFunction(func)`.
+Registered as global static native functions (not a class; no `IScriptable` parent) in [gwheel/src/rtti.cpp](gwheel/src/rtti.cpp) `PostRegisterTypes` via `RED4ext::CGlobalFunction::Create(name, name, fn)` + `AddParam` + `SetReturnType` + `rtti->RegisterFunction(func)`.
 
 Each function uses the canonical stack-frame shape:
 
@@ -154,29 +155,35 @@ Parameters are read sequentially with `RED4ext::GetParameter(aFrame, &arg)`, fol
 | `GWheel_IsPluginReady` | — | `Bool` | `true` iff the Logitech SDK bound a device. |
 | `GWheel_GetDeviceInfo` | — | `String` | Human-readable summary: product name, operating range, FFB flag, SDK version, hook state, fire count. |
 | `GWheel_HasFFB` | — | `Bool` | `true` iff a device is bound and advertises force feedback. |
+| `GWheel_DetectedHasFfbHardware` | — | `Bool` | Same as HasFFB; named distinctly so the Mod Settings capability-flag plumbing reads cleanly. |
+| `GWheel_DetectedHasRevLeds` | — | `Bool` | `true` iff the bound wheel has the rev-strip LED bar (G25/G27/G29/G920/G923 etc.). |
+| `GWheel_DetectedHasRightCluster` | — | `Bool` | `true` iff the bound wheel has the lower-cluster cluster (Plus/Minus/scroll; absent on G920). |
+| `GWheel_DetectedModelName` | — | `String` | Wheel model name from the device table. |
 | `GWheel_ReadConfig` | — | `String` | Current config serialized as JSON (same schema as `config.json`). |
 
 ### Config setters
 
-Each setter atomically swaps the live snapshot and writes `config.json` to disk. All return `Bool` (`true` on accept).
+Each setter atomically swaps the live snapshot and writes `config.json` to disk.
 
 | Native | Params |
 | --- | --- |
 | `GWheel_SetInputEnabled` | `v: Bool` |
 | `GWheel_SetClutchAsBrake` | `v: Bool` |
 | `GWheel_SetFfbEnabled` | `v: Bool` |
-| `GWheel_SetFfbStrengthPct` | `pct: Int32` (0–100) |
 | `GWheel_SetFfbDebugLogging` | `v: Bool` |
-| `GWheel_SetOverrideEnabled` | `v: Bool` |
-| `GWheel_SetOverrideSensitivity` | `v: Float` (0.25–2.0) |
-| `GWheel_SetOverrideRangeDeg` | `deg: Int32` (40–900) |
-| `GWheel_SetOverrideCenteringSpringPct` | `pct: Int32` (0–100) |
+| `GWheel_SetFfbTorquePct` | `pct: Int32` (0–100) |
+| `GWheel_SetStationaryThresholdMps` | `v: Float` (0.0–5.0) |
+| `GWheel_SetYawFeedbackPct` | `pct: Int32` (0–100) |
+| `GWheel_SetActiveTorqueStrengthPct` | `pct: Int32` (0–100) |
+| `GWheel_SetHandshakePlayOnStart` | `v: Bool` |
+| `GWheel_SetLedEnabled` | `v: Bool` |
+| `GWheel_SetLedVisualizerWhileMusic` | `v: Bool` |
 
 ### Bindings
 
 | Native | Params | Purpose |
 | --- | --- | --- |
-| `GWheel_SetInputBinding` | `inputId: Int32, action: Int32` | Map a PhysicalInput (0–19) to an Action (0–38). |
+| `GWheel_SetInputBinding` | `inputId: Int32, action: Int32` | Map a PhysicalInput (0–19) to an Action (0–36). |
 
 ### Player-vehicle lifecycle
 
@@ -185,13 +192,28 @@ Each setter atomically swaps the live snapshot and writes `config.json` to disk.
 | `GWheel_SetPlayerVehicle` | `v: ref<VehicleObject>` | Cache on mount (also sets `sources::InVehicle(true)`). |
 | `GWheel_ClearPlayerVehicle` | — | Clear on dismount (also `sources::InVehicle(false)`). |
 
+### Vehicle telemetry (pushed from redscript)
+
+| Native | Params | Purpose |
+| --- | --- | --- |
+| `GWheel_SetEngineRpmNormalized` | `v: Float` (0..1) | Pushed by `gwheel_vehicle_signals.reds` from the vehicle Blackboard's RPMValue / MaxRPM. Drives the LED rev strip. |
+| `GWheel_SetRadioActive` | `v: Bool` | Pushed when the in-car radio is on. Switches the LED rev strip to the music visualizer. |
+
+### Event natives
+
+| Native | Params | Purpose |
+| --- | --- | --- |
+| `GWheel_OnVehicleBump` | `kick: Float` | Called from `gwheel_events.reds` `OnVehicleBumpEvent` wrap; queues a transient FFB jolt overlay. |
+| `GWheel_OnVehicleHit` | `kick: Float` | Currently unused (legacy path; OnVehicleHit lives on the wrong class). |
+| `GWheel_OnWheelMaterial` | `wheelIdx: Int32, mat: CName` | Called from `gwheel_surface.reds` raycast; surface-baseline mapping currently dormant. |
+
 ## Config JSON schema
 
-Path: `<CP2077>/red4ext/plugins/gwheel/config.json`. Loaded at plugin load, written back on every setter, saved on unload.
+Path: `<CP2077>/red4ext/plugins/gwheel/config.json`. Loaded at plugin load, written back on every setter. Schema version `4`. The FOMOD installer ships a minimal `{ "version": 4, "handshake": { "playOnStart": true|false } }` (every other field falls back to its in-code default until the user touches it in Mod Settings); the C++ side serializes the full schema on its first write.
 
 ```json
 {
-  "version": 3,
+  "version": 4,
 
   "input": {
     "enabled": true,
@@ -201,15 +223,24 @@ Path: `<CP2077>/red4ext/plugins/gwheel/config.json`. Loaded at plugin load, writ
 
   "ffb": {
     "enabled": true,
-    "strengthPct": 80,
-    "debugLogging": false
+    "debugLogging": true,
+    "torquePct": 100,
+    "stationaryThresholdMps": 0.5,
+    "yawFeedbackPct": 50,
+    "activeTorqueStrengthPct": 100
   },
 
-  "override": {
-    "enabled": false,
-    "sensitivity": 1.0,
-    "rangeDeg": 90,
-    "centeringSpringPct": 50
+  "handshake": {
+    "playOnStart": true
+  },
+
+  "led": {
+    "enabled": true,
+    "visualizerWhileMusic": true
+  },
+
+  "music": {
+    "processName": ""
   },
 
   "perVehicle": {
@@ -219,26 +250,29 @@ Path: `<CP2077>/red4ext/plugins/gwheel/config.json`. Loaded at plugin load, writ
     "van":        { "steeringMultiplier": 0.9, "responseDelayMs": 30 }
   },
 
-  "bindings": [3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 30, 20, 4, 5, 6, 7, 1, 14, 15, 0]
+  "bindings": [10, 10, 33, 34, 35, 36, 31, 3, 1, 4, 30, 24, 27, 19, 7, 2, 18, 13, 14, 5]
 }
 ```
 
-**Defaults** (constants in `config.h`):
+**Defaults** (constants in [gwheel/src/config.h](gwheel/src/config.h)):
 
 | Field | Default | Range | Notes |
 | --- | --- | --- | --- |
 | `input.enabled` | `true` | — | Master toggle for wheel input. |
-| `input.clutchAsBrake` | `false` | — | When true, `BuildFrame` publishes `brake = max(brake, clutch)` so the clutch pedal brakes alongside the brake pedal. |
-| `input.responseCurve` | `"default"` | `"default"` \| `"subdued"` \| `"sharp"` | Shapes axis response pre-game. |
-| `ffb.enabled` | `true` | — | Plugin-generated effects (collision / texture) only. |
-| `ffb.strengthPct` | `80` | 0 – 100 | Scales plugin effect magnitudes; does not affect G HUB spring. |
-| `ffb.debugLogging` | `false` | — | Verbose log of every effect start/stop. |
-| `override.enabled` | `false` | — | Gates every field below. |
-| `override.sensitivity` | `1.0` | 0.25 – 2.00 | Only when `override.enabled`. |
-| `override.rangeDeg` | `90` | 40 – 900 | CP2077's virtual-wheel cap is ~90°; raise for more physical travel per on-screen degree. |
-| `override.centeringSpringPct` | `50` | 0 – 100 | Only when `override.enabled`; plugin-driven centering spring. |
-| `perVehicle.*` | as shown | positive floats / ints | Per-vehicle tuning. |
-| `bindings` | 20-element array | `Action` integers | `PhysicalInput` index → `Action` value. See "Button bindings" below. |
+| `input.clutchAsBrake` | `false` | — | When true, `BuildFrame` publishes `brake = max(brake, clutch)` so the clutch pedal brakes. |
+| `input.responseCurve` | `"default"` | `"default"` \| `"subdued"` \| `"sharp"` | Shapes axis response pre-game. (No Mod Settings UI yet.) |
+| `ffb.enabled` | `true` | — | Master enable for all plugin-generated FFB. |
+| `ffb.debugLogging` | `true` | — | Verbose log of every effect start/stop. |
+| `ffb.torquePct` | `100` | 0 – 100 | Scales plugin effect magnitudes via `wheel::SetGlobalStrength`. |
+| `ffb.stationaryThresholdMps` | `0.5` | 0.0 – 5.0 | Below this speed all centering forces are off; the wheel rests where the driver leaves it. |
+| `ffb.yawFeedbackPct` | `50` | 0 – 100 | Additive cornering-spring stiffness during rotation, normalised against the car's own turn rate. |
+| `ffb.activeTorqueStrengthPct` | `100` | 0 – 100 | Gain on the directional push-back constant force. |
+| `handshake.playOnStart` | `true` | — | Pon pon shi greeting on game start. |
+| `led.enabled` | `true` | — | Rev-strip LEDs. |
+| `led.visualizerWhileMusic` | `true` | — | Switch rev strip to music visualizer when the in-car radio is on. |
+| `music.processName` | `""` | string | Empty = capture this game's audio. Non-empty = capture the named process instead. |
+| `perVehicle.*` | as shown | positive floats / ints | Per-vehicle tuning consumed inside the C++ FFB / steering math (no Mod Settings UI). |
+| `bindings` | 20-element array | `Action` integers (0–36) | `PhysicalInput` index → `Action` value. See "Button bindings" below. |
 
 Validation is per-setter inside `config::Set*`: each setter clamps/rejects out-of-range values before committing. There is no monolithic `ApplyConfig`.
 
@@ -247,7 +281,7 @@ Validation is per-setter inside `config::Set*`: each setter clamps/rejects out-o
 Wheel buttons map to in-game actions through a table driven by two enums that must stay in lockstep:
 
 - `PhysicalInput` ([input_bindings.h:14-37](gwheel/src/input_bindings.h#L14-L37)) — 20 stable IDs for the controls on a modern G923-class wheel: `PaddleLeft`, `PaddleRight`, `DpadUp..Right`, `ButtonA..Y`, `Start`, `Select`, `LSB`, `RSB`, `Plus`, `Minus`, `ScrollClick`, `ScrollCW`, `ScrollCCW`, `Xbox`. Order is locked by the config.json `bindings` array and by the field order in `gwheel_settings.reds` — do not renumber; new controls append.
-- `Action` ([input_bindings.h:48-90](gwheel/src/input_bindings.h#L48-L90)) — 39 values covering horn, headlights, handbrake, autodrive, exit, camera cycles, zoom, weapon slots, map / journal / inventory / phone / perks / crafting, quick save, radio, consumable, iconic cyberware, pause, tag, call vehicle, menu nav (Confirm / Cancel / Up / Down / Left / Right). Indices must match `GWheelAction` in [gwheel_settings.reds:268-308](gwheel_reds/gwheel_settings.reds#L268-L308) so Mod Settings dropdown indices round-trip.
+- `Action` ([gwheel/src/input_bindings.h](gwheel/src/input_bindings.h)) — 36 values (plus `None=0`) covering driving (horn, headlights, handbrake, autodrive, exit, call vehicle), camera (cycle forward, rear-view, reset), combat (shoot primary/secondary/tertiary), weapons (next/prev, slot 1/2, switch, holster), radio (menu, next), gameplay (consumable, iconic cyberware, quick save), menus (map, journal, inventory, phone, perks, crafting, pause), and menu nav (Confirm / Cancel / Up / Down / Left / Right). Indices must match `GWheelAction` in [gwheel_reds/gwheel_settings.reds](gwheel_reds/gwheel_settings.reds) so Mod Settings dropdown indices round-trip.
 
 Each `Action` dispatches to a specific Windows virtual-key or mouse event via `SendInput`. Tap actions fire DOWN+UP on rising edge; Hold actions mirror the physical state.
 
@@ -269,23 +303,29 @@ Dispatch lifecycle each pump tick (`input_bindings::OnTick`):
 
 ## FFB effect model
 
-Three effects: `GUID_ConstantForce`, `GUID_Damper`, `GUID_Spring` (via the Logitech SDK, not DirectInput). Created at bind time, reparameterized per event via `LogiPlay*Force*`, stopped via `LogiStop*`. The spring is only active when `override.enabled && override.centeringSpringPct > 0`; otherwise centering stays with G HUB.
+Layered Logitech SDK effects (`GUID_ConstantForce`, `GUID_Damper`, `GUID_Spring`, plus a road-surface SINE and an airborne shake). Created at bind time, reparameterized per event via `LogiPlay*Force*`, stopped via `LogiStop*`. Each effect's magnitude is scaled by `ffb.torquePct / 100` via `wheel::SetGlobalStrength`. If the bound wheel reports no FFB support, every FFB call becomes a no-op; callers don't need to branch.
 
-Every effect magnitude is scaled by `ffb.strengthPct / 100` via `wheel::SetGlobalStrength`. If the bound wheel reports no FFB support, every FFB call becomes a no-op — callers do not need to branch.
+The plugin computes its own per-tick FFB from real game state, not by translating game-side rumble (CP2077 has no vehicle rumble signal). Per-car parameters are derived from `WheeledPhysics` (turn rate → yaw reference, wheelbase → cruise speed and centering baseline) so the feel is consistent across vehicle classes.
+
+A 200 ms watchdog tears down all effects when the vehicle detour stops firing (pause menu, unmount, crash); without it the last set effect would persist and the wheel would lock up at the last commanded torque.
 
 ## G HUB coexistence
 
-| Knob | Default owner | Mod owner when `override.enabled = true` |
-| --- | --- | --- |
-| Rotation range (°) | G HUB | Mod (via Logitech SDK controller-properties update) |
-| Sensitivity curve | G HUB | Mod (pre-game shaping) |
-| Centering spring | G HUB | Mod (plugin-created spring effect) |
-| Collision FFB | Mod | Mod |
-| Surface-texture FFB | Mod | Mod |
-| Per-vehicle response | Mod | Mod |
-| Wheel button → keyboard (for bound controls) | Mod (via `input_bindings` + `kbd_hook`) | Mod |
+| Knob | Owner |
+| --- | --- |
+| Rotation range (°) | G HUB. The mod reads it via `LogiGetOperatingRange` at 1 Hz and scales its FFB output to match. |
+| Sensitivity curve | G HUB. |
+| Centering spring | The mod's physics-derived centering torque. G HUB's own spring should be off in the wheel's profile. |
+| Collision FFB | Mod (`gwheel_events.reds` + `wheel::TriggerJolt`). |
+| Surface-texture FFB | Mod (envelope from chassis dynamics; surface-material baseline currently dormant). |
+| Slip-angle countersteer | Mod (lateral-velocity dot world-right, gated on grip factor). |
+| Per-vehicle response | Mod (derived from WheeledPhysics; user-tunable scalars in Mod Settings). |
+| Rev-strip LEDs / music visualizer | Mod (driven from vehicle Blackboard via `gwheel_vehicle_signals.reds`). |
+| Wheel button → keyboard | Mod (`input_bindings` + `kbd_hook`). |
 
-The `kbd_hook` layer is what makes this peaceful. G HUB's own Cyberpunk profile also synthesizes keyboard events; without filtering, bound controls would double-fire (wheel → `SendInput(Handbrake)` **and** G HUB → `Space`). The LL keyboard hook drops any non-tagged synthetic event matching a vehicle-only key while the player is on foot, and our events carry the `'gWHL'` `dwExtraInfo` tag to pass through.
+The `kbd_hook` layer keeps this peaceful. G HUB's own Cyberpunk profile also synthesizes keyboard events; without filtering, bound controls would double-fire (wheel → `SendInput(Handbrake)` and G HUB → `Space`). The LL keyboard hook drops any non-tagged synthetic event matching a vehicle-only key while the player is on foot; the plugin's own events carry the `'gWHL'` `dwExtraInfo` tag to pass through.
+
+The Logitech SDK's `LogiSetPreferredControllerProperties` API is broken on most G HUB builds and has been since at least 2023, so this mod does not write rotation range, sensitivity, or centering preferences back to the wheel. Per-effect magnitude scaling is the workaround.
 
 ## Developer tools
 
@@ -295,7 +335,7 @@ The `kbd_hook` layer is what makes this peaceful. G HUB's own Cyberpunk profile 
 ## Build / deploy
 
 - Build: `powershell -ExecutionPolicy Bypass -File build.ps1 -Config Release` (wraps CMake + MSVC; VS2022 + CMake 3.21+ required). Output at `build/gwheel/Release/gwheel.dll`.
-- Deploy: `powershell -ExecutionPolicy Bypass -File deploy.ps1 [-Game <path>]`. Zip mode (default) produces `dist/gwheel-<version>.zip` laid out for the FOMOD installer. Direct mode (`-Game`) copies the DLL + four `.reds` files into `<CP2077>/red4ext/plugins/gwheel/` and `<CP2077>/r6/scripts/gwheel/` and invalidates the redscript cache.
+- Deploy: `powershell -ExecutionPolicy Bypass -File deploy.ps1 [-Game <path>]`. Zip mode (default) produces `dist/gwheel-<version>.zip` laid out for the FOMOD installer (includes the patched `mod_settings.dll` from `vendor/mod_settings/build/Release/`). Direct mode (`-Game`) copies the DLL + six `.reds` files into `<CP2077>/red4ext/plugins/gwheel/` and `<CP2077>/r6/scripts/gwheel/`, overwrites `<CP2077>/red4ext/plugins/mod_settings/mod_settings.dll` with the patched build, and invalidates the redscript cache.
 - Runtime deps: [RED4ext](https://github.com/WopsS/RED4ext), [redscript](https://github.com/jac3km4/redscript), [Mod Settings](https://github.com/jackhumbert/mod_settings), [ArchiveXL](https://github.com/psiberx/cp2077-archive-xl).
 
 ## Sources

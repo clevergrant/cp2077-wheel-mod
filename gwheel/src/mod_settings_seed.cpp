@@ -1,4 +1,5 @@
 #include "mod_settings_seed.h"
+#include "config.h"
 #include "logging.h"
 #include "device_table.h"
 
@@ -136,11 +137,24 @@ namespace gwheel::mod_settings_seed
         WriteFlag(wpath, L"hasRevLeds",      hasLeds);
         WriteFlag(wpath, L"hasRightCluster", hasRightCluster);
 
+        // Mirror the FOMOD-installed handshake choice into mod_settings/user.ini.
+        // The FOMOD writes config.json's handshake.playOnStart at install time,
+        // and that value drives the actual handshake firing during wheel-bind.
+        // But the in-game Mod Settings menu reads user.ini, so without this
+        // seed the UI would show the redscript default (false) on a fresh
+        // install while the wheel actually played the handshake. Writing it
+        // here keeps both stores in lockstep: redscript Push() always rewrites
+        // config.json from the listener, and the next launch's seed reflects
+        // the user's last in-game toggle.
+        const bool handshake = config::Current().handshake.playOnStart;
+        WriteFlag(wpath, L"handshakePlayOnStart", handshake);
+
         log::InfoF("[gwheel] mod_settings_seed: wrote [GWheelSettings] hasFfbHardware=%d "
-                   "hasRevLeds=%d hasRightCluster=%d -> %ls",
+                   "hasRevLeds=%d hasRightCluster=%d handshakePlayOnStart=%d -> %ls",
                    hasFfb ? 1 : 0,
                    hasLeds ? 1 : 0,
                    hasRightCluster ? 1 : 0,
+                   handshake ? 1 : 0,
                    wpath.c_str());
     }
 }

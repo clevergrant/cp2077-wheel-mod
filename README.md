@@ -1,118 +1,85 @@
 # Cyberpunk 2077 — Logitech G-series Steering Wheel Mod
 
-A RED4ext plugin that gives Cyberpunk 2077 first-class support for Logitech G-series steering wheels. Reads the wheel through the official Logitech Steering Wheel SDK, drives force feedback back to the wheel, injects vehicle input into `Cyberpunk2077.exe` via a direct function detour (no virtual gamepad, no driver install), and exposes settings in the game's own menu.
+A RED4ext plugin that gives Cyberpunk 2077 first-class support for Logitech G-series steering wheels. Reads the wheel through the official Logitech Steering Wheel SDK, drives physics-aware force feedback (centering, cornering, surface texture, collision jolts, slip-angle countersteer) back to the wheel, and injects vehicle input through a hash-resolved detour on `vehicle::BaseObject::UpdateVehicleCameraInput`. Rev-strip LEDs follow real engine RPM and switch to a music visualizer when the in-car radio is on. Wheel buttons are bindable to in-game actions through Mod Settings. No virtual gamepad, no driver install, no XInput shim.
 
-Version: **2.31.0** — first release for game patch 2.31, ground-up rewrite. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
+Version: **2.31.0**, ground-up rewrite for game patch 2.31. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
-## Features
-
-- Any Logitech G-series wheel (see table below), auto-detected by USB VID/PID.
-- Steering, throttle, brake, and clutch routed directly from the wheel to Cyberpunk's vehicle input.
-- Force-feedback effects for collisions and surface texture. FFB is skipped gracefully on wheels without a motor.
-- Settings page in the game's own menu (via [Mod Settings](https://github.com/jackhumbert/mod_settings)) — deadzones, FFB strength, per-vehicle response curves, and an opt-in Override G HUB section.
-- **Respects Logitech G HUB.** Rotation range, sensitivity curve, and centering spring stay with G HUB unless you explicitly turn on Override.
+User-facing documentation for the Nexus mod page lives in [NEXUS_README.md](NEXUS_README.md).
 
 ## Supported wheels
 
-| Model | Force feedback |
-| --- | --- |
-| WingMan Formula Force | yes |
-| WingMan Formula Force GP | yes |
-| Driving Force | no |
-| Momo Force | yes |
-| Driving Force Pro | yes |
-| G25 Racing Wheel | yes |
-| Driving Force GT | yes |
-| G27 Racing Wheel | yes |
-| G29 Driving Force | yes |
-| G920 Driving Force | yes |
-| G923 (Xbox / PS / PC) | yes |
-| Momo Racing | yes |
-| Formula Vibration Feedback | vibration only |
+| Model | FFB | Rev LEDs | Lower cluster |
+| --- | --- | --- | --- |
+| WingMan Formula Force / GP | yes | no | no |
+| Driving Force | no | no | no |
+| Momo Force / Momo Racing | yes | no | no |
+| Driving Force Pro / Driving Force GT | yes | no | no |
+| G25, G27 | yes | yes | yes |
+| G29 | yes | yes | yes |
+| G920 | yes | yes | no |
+| G923 (Xbox / PS / PC) | yes | yes | yes |
+| Formula Vibration Feedback | vibration | no | no |
 
-Non-Logitech wheels are not supported. If your wheel is plugged in and this mod doesn't claim it, the mod exits cleanly and stays out of the way.
+Hardware capability detection (FFB, rev-strip LEDs, lower-cluster buttons) drives which sections appear in the in-game Settings UI.
 
 ## Requirements
 
-- **Cyberpunk 2077** 2.0 or later (tested against current patch).
+- **Cyberpunk 2077** patch 2.31 (build 5294808). Earlier patches may work but are untested.
 - **[RED4ext](https://github.com/WopsS/RED4ext)** — loads the plugin.
 - **[redscript](https://github.com/jac3km4/redscript)** — compiles the `.reds` files.
-- **[Mod Settings](https://github.com/jackhumbert/mod_settings)** — in-game settings page framework.
 - **[ArchiveXL](https://github.com/psiberx/cp2077-archive-xl)** — required by Mod Settings.
-- **Logitech G HUB** (recommended) — Logitech's own wheel manager. This mod plays nicely with it.
+- **[Mod Settings](https://github.com/jackhumbert/mod_settings)** v0.2.21+ — in-game settings page framework. Required, not optional. The release zip bundles a patched build of the Mod Settings DLL that adds a `ModSettings.hidden` runtime property; the patch is API-compatible with upstream.
+- **Logitech G HUB** — provides the user-mode service the Logitech SDK talks to.
 
-No Cyber Engine Tweaks dependency.
+No Cyber Engine Tweaks. No ViGEmBus. No drivers.
 
 ## Install
 
-### Via Vortex
+End users install via Vortex. The Nexus "Mod Manager Download" deep-link is the supported path; see [NEXUS_README.md](NEXUS_README.md) for the user-facing instructions.
 
-1. Install the dependencies above (each has its own Nexus listing and FOMOD).
-2. Download the latest release ZIP from Nexus.
-3. Drop it on Vortex; accept the FOMOD prompts. The installer warns if RED4ext, ArchiveXL, or Mod Settings isn't present.
+For dev iteration, skip Vortex with direct deploy:
 
-### Manually
-
-Extract the release ZIP into your Cyberpunk 2077 install directory. The expected final layout:
-
-```text
-<CP2077>/red4ext/plugins/gwheel/gwheel.dll
-<CP2077>/red4ext/plugins/gwheel/config.json
-<CP2077>/red4ext/plugins/mod_settings/mod_settings.dll   (patched fork; see Configuration)
-<CP2077>/r6/scripts/gwheel/gwheel_natives.reds
-<CP2077>/r6/scripts/gwheel/gwheel_settings.reds
-<CP2077>/r6/scripts/gwheel/gwheel_mount.reds
-<CP2077>/r6/scripts/gwheel/gwheel_events.reds
-<CP2077>/r6/scripts/gwheel/gwheel_surface.reds
-<CP2077>/r6/scripts/gwheel/gwheel_vehicle_signals.reds
+```powershell
+.\deploy.ps1 -Game "S:\SteamLibrary\steamapps\common\Cyberpunk 2077"
 ```
 
-## First run
+This rebuilds the DLL if sources are newer, copies the DLL + `.reds` files into the game install, copies the patched `mod_settings.dll` over the user's Mod Settings install, and invalidates the redscript cache. See [deploy.ps1](deploy.ps1) for details.
 
-1. Plug the wheel in and let G HUB pick it up.
-2. Launch the game. The plugin logs to `red4ext/logs/gwheel-*.log`; look for `[gwheel] loaded v2.31.0` and a line naming the detected wheel.
-3. Open the game's Settings menu → **Mod Settings** → **G-series Wheel**.
-4. In the Advanced section, the first-time tip reads: "Sensitivity, rotation range, and centering spring are managed by G HUB. Enable Advanced → Override G HUB only if you want this mod to take control."
-5. Get in any car. The wheel should steer it.
+## Settings (in-game)
 
-## Configuration
+All settings live in the game's **Mod Settings → G-series Wheel** page. Categories:
 
-All settings live in the game's Settings menu. Four groups:
+- **Wheel input** — master enable, "treat clutch as brake".
+- **Force feedback** — enable, FFB strength, cornering feedback, active torque, stationary threshold.
+- **Rev-strip LEDs** — enable, music visualizer while music is playing.
+- **Button bindings** — 15 controls present on every G-series wheel.
+- **Lower-cluster bindings** — 5 controls on G25/G27/G29/G923 (absent on G920).
+- **Startup** — Pon pon shi greeting on/off.
+- **Debug** — debug logging.
 
-- **Wheel — Input.** Master toggle, per-axis deadzones, per-vehicle response curve.
-- **Wheel — FFB.** Enable, strength (scales collision/texture effects), debug logging.
-- **Wheel — Advanced.** **Override G HUB** toggle (default OFF). Only when ON: sensitivity, operating range, centering spring. Leaving this OFF preserves whatever you've tuned in G HUB.
-- **Wheel — Button Bindings.** 20 physical wheel controls (paddles, D-pad, A/B/X/Y, Start/Select, LSB/RSB, +/-, scroll, Xbox button) each bindable to one of 39 in-game actions (horn, headlights, handbrake, camera, weapons, map, pause, etc.). D-pad and A/B/X/Y auto-swap to arrow-keys / Enter / Escape while any pause menu is open so the wheel navigates menus like a controller.
+Hardware-capability sections auto-hide on wheels without the relevant components, driven by capability flags written to `red4ext/plugins/mod_settings/user.ini` from the C++ side at plugin load (see `gwheel/src/mod_settings_seed.cpp`).
 
-Values are persisted by Mod Settings across game runs. A backup copy is written to `<CP2077>/red4ext/plugins/gwheel/config.json` — safe to copy/edit between installs, but the game-side Settings page is authoritative while the game is running.
+Settings are persisted by Mod Settings and mirrored to `red4ext/plugins/gwheel/config.json`.
 
 ## Troubleshooting
 
-**Plugin doesn't load.** Check `<CP2077>/red4ext/logs/` for entries tagged `[gwheel]`. A missing entry means RED4ext didn't load it — verify `red4ext/plugins/gwheel/gwheel.dll` exists and is unblocked (right-click → Properties → Unblock if Windows marked it).
-
-**Settings page doesn't appear.** Mod Settings + ArchiveXL need to be installed correctly. The wheel still works without them; you just lose in-game tuning. Edit `config.json` directly as a fallback.
-
-**Wheel detected but nothing happens in the car.** Axis injection goes through a C++ detour on `vehicle::BaseObject::UpdateVehicleCameraInput`, resolved via a hash in RED4ext's address database. If RED4ext itself is behind the current game patch, it terminates the game with its own message box at launch — update RED4ext first. If the game launches but the wheel still doesn't steer, check `red4ext/logs/gwheel-*.log` for `[gwheel:hook] UpdateVehicleCameraInput fired for the first time` (live-hook signal) and call `GWheel_GetDeviceInfo` from a debug console to see the fire counter. Missing or stuck at zero means the mount gate isn't tracking your vehicle — check that `gwheel_mount.reds` compiled (see `r6/cache/modded/final.redscripts.log`).
-
-**FFB never fires.** Confirm the wheel has a motor (see the supported-wheels table). Confirm `GWheel_HasFFB()` returns true in the mod's log output. In G HUB, make sure "Allow game to adjust settings" is enabled; without it the game's force commands won't reach the wheel.
+- **Plugin doesn't load.** Check `red4ext/logs/` for `[gwheel]` lines. Missing entries usually mean RED4ext didn't load the DLL: confirm `red4ext/plugins/gwheel/gwheel.dll` exists and isn't blocked by Windows (right-click → Properties → Unblock).
+- **Settings page is missing.** Mod Settings + ArchiveXL must both be installed. Without them the mod runs on defaults from `config.json` but has no in-game tuning.
+- **Wheel detected but the car doesn't move.** Confirm `[gwheel:hook] UpdateVehicleCameraInput fired for the first time` in the log after mounting a vehicle. If absent, redscript didn't compile the mount wrap; check `r6/cache/modded/final.redscripts.log`.
+- **Three orphan toggles named `hasFfbHardware` / `hasRevLeds` / `hasRightCluster`.** Vortex installed stock Mod Settings on top of the patched build. Re-deploy and let this mod win the file conflict on `mod_settings.dll`.
 
 ## Uninstall
 
-Delete:
-
-- `<CP2077>/red4ext/plugins/gwheel/`
-- `<CP2077>/r6/scripts/gwheel/`
-
-(Vortex handles both automatically on uninstall.)
+Vortex → Uninstall. Or manually delete `<CP2077>/red4ext/plugins/gwheel/` and `<CP2077>/r6/scripts/gwheel/`. To revert to stock Mod Settings, reinstall upstream Mod Settings to overwrite the patched DLL.
 
 ## Contributing
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the internals. PRs welcome, especially for:
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the internals. PRs welcome, especially:
 
-- Additional Logitech wheel PIDs not in the table
-- Additional per-vehicle response profiles
-- Verified per-device button layouts for G920 / G29 / G27 (run `tools/input_probe` against your wheel, diff against `input_bindings.cpp`'s `kG923XboxLayout`)
+- Additional Logitech wheel PIDs not in `gwheel/src/device_table.cpp`.
+- Verified per-device button layouts for G920 / G29 / G27 (run `tools/input_probe` against your wheel, diff against `kG923XboxLayout` in `gwheel/src/input_bindings.cpp`).
+- Surface-material FFB tuning if you can capture dirt / sand / gravel CName transitions through the existing `gwheel_surface.reds` raycast (see `gwheel/src/wheel.cpp` for the existing baseline-by-material lookup).
 
 ## License
 
-TBD — v2.31.0 is unlicensed. A license will be added before the first public Nexus release.
+[MIT](LICENSE). Bundled patched mod_settings.dll is also MIT (forked from jackhumbert/mod_settings).

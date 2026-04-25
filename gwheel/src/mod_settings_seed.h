@@ -10,6 +10,12 @@ namespace gwheel::mod_settings_seed
     // the current wheel doesn't have (or hides everything when no wheel is
     // attached).
     //
+    // Also mirrors config.json's handshake.playOnStart into [GWheelSettings]
+    // handshakePlayOnStart so the in-game Mod Settings menu reflects the
+    // FOMOD installer's handshake choice on first launch (and stays in sync
+    // with the C++ side thereafter, since redscript Push() rewrites
+    // config.json from the listener instance).
+    //
     // Must be called from plugin OnLoad. Plugin OnLoads complete before
     // RED4ext processes script data, so our writes are always in place when
     // mod_settings parses the file. Probe is synchronous, ~tens of ms,
