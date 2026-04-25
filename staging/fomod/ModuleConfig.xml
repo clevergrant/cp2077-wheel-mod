@@ -18,6 +18,12 @@
           destination="r6\scripts\gwheel\gwheel_natives.reds"/>
     <file source="gwheel_reds\gwheel_settings.reds"
           destination="r6\scripts\gwheel\gwheel_settings.reds"/>
+    <file source="gwheel_reds\gwheel_mount.reds"
+          destination="r6\scripts\gwheel\gwheel_mount.reds"/>
+    <file source="gwheel_reds\gwheel_events.reds"
+          destination="r6\scripts\gwheel\gwheel_events.reds"/>
+    <file source="gwheel_reds\gwheel_surface.reds"
+          destination="r6\scripts\gwheel\gwheel_surface.reds"/>
   </requiredInstallFiles>
 
   <installSteps order="Explicit">
@@ -137,7 +143,7 @@
           <plugins order="Explicit">
 
             <plugin name="Play startup handshake (recommended)">
-              <description>When the wheel connects on game start, play a brief four-triplet FFB pattern and then center the wheel with a spring. Confirms the mod is live and returns the wheel to 0°. Recommended unless you find it annoying.</description>
+              <description>When the wheel connects on game start, play the gwheel handshake: an LED sweep across the rev strip, a four-triplet FFB rhythm with LED flashes, and a centering spring with a breath pulse on the LEDs. Confirms the mod is live and returns the wheel to 0°. Recommended unless you find it annoying.</description>
               <files>
                 <file source="fomod_configs\config_handshake_on.json"
                       destination="red4ext\plugins\gwheel\config.json"/>
@@ -150,7 +156,7 @@
             </plugin>
 
             <plugin name="Skip startup handshake">
-              <description>Connect the wheel silently — no FFB pulses, no centering spring. The mod still reads inputs and drives game FFB as usual.</description>
+              <description>Connect the wheel silently — no FFB pulses, no LED dance, no centering spring. The mod still reads inputs and drives game FFB / LEDs as usual.</description>
               <files>
                 <file source="fomod_configs\config_handshake_off.json"
                       destination="red4ext\plugins\gwheel\config.json"/>

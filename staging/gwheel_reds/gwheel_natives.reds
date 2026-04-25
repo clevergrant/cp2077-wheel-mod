@@ -7,19 +7,37 @@ public static native func GWheel_GetDeviceInfo() -> String;
 public static native func GWheel_HasFFB() -> Bool;
 public static native func GWheel_ReadConfig() -> String;
 
+// Wheel-model auto-discovery. Read at OnGameAttached to populate dependency
+// targets that hide controls the bound wheel doesn't physically have.
+// Permissive default (true / "(no wheel bound)") when the SDK hasn't bound
+// yet, so the settings page shows everything until detection is ready.
+public static native func GWheel_DetectedHasRightCluster() -> Bool;
+public static native func GWheel_DetectedHasFfbHardware() -> Bool;
+public static native func GWheel_DetectedHasRevLeds() -> Bool;
+public static native func GWheel_DetectedModelName() -> String;
+
 public static native func GWheel_SetInputEnabled(v: Bool) -> Bool;
-public static native func GWheel_SetSteerDeadzonePct(pct: Int32) -> Bool;
-public static native func GWheel_SetThrottleDeadzonePct(pct: Int32) -> Bool;
-public static native func GWheel_SetBrakeDeadzonePct(pct: Int32) -> Bool;
+public static native func GWheel_SetClutchAsBrake(v: Bool) -> Bool;
 
 public static native func GWheel_SetFfbEnabled(v: Bool) -> Bool;
-public static native func GWheel_SetFfbStrengthPct(pct: Int32) -> Bool;
 public static native func GWheel_SetFfbDebugLogging(v: Bool) -> Bool;
+public static native func GWheel_SetFfbTorquePct(pct: Int32) -> Bool;
 
-public static native func GWheel_SetOverrideEnabled(v: Bool) -> Bool;
-public static native func GWheel_SetOverrideSensitivity(v: Float) -> Bool;
-public static native func GWheel_SetOverrideRangeDeg(deg: Int32) -> Bool;
-public static native func GWheel_SetOverrideCenteringSpringPct(pct: Int32) -> Bool;
+// Startup handshake (LED sweep + 4 triplets + centering breath) on wheel bind.
+// Effective at next wheel bind — toggling mid-session does not retroactively
+// play or cancel a handshake that already fired this session.
+public static native func GWheel_SetHandshakePlayOnStart(v: Bool) -> Bool;
+
+// Phase-1 physics FFB: speed-gated self-centering spring with yaw-rate bonus.
+public static native func GWheel_SetStationaryThresholdMps(mps: Float) -> Bool;
+public static native func GWheel_SetYawFeedbackPct(pct: Int32) -> Bool;
+public static native func GWheel_SetActiveTorqueStrengthPct(pct: Int32) -> Bool;
+
+// Rev-strip LED bar on top of the wheel (G29/G920/G923). VisualizerWhileMusic
+// swaps the speed-driven rev bar for a WASAPI-loopback audio visualizer
+// whenever system audio is playing; falls back to rev-strip on silence.
+public static native func GWheel_SetLedEnabled(v: Bool) -> Bool;
+public static native func GWheel_SetLedVisualizerWhileMusic(v: Bool) -> Bool;
 
 // Per-physical-input action binding. inputId is one of the stable IDs in
 // gwheel/src/input_bindings.h (0 = PaddleLeft, 1 = PaddleRight, etc.).
@@ -35,3 +53,23 @@ public static native func GWheel_SetInputBinding(inputId: Int32, action: Int32) 
 // wrappers.
 public static native func GWheel_SetPlayerVehicle(v: ref<VehicleObject>) -> Bool;
 public static native func GWheel_ClearPlayerVehicle() -> Bool;
+
+// Vehicle telemetry pushed from Blackboard listeners (gwheel_vehicle_signals.reds).
+// Normalized engine RPM in [0..1] = RPMValue / VehEngineData.MaxRPM().
+// Radio state mirrors VehicleDef.VehRadioState.
+public static native func GWheel_SetEngineRpmNormalized(v: Float) -> Bool;
+public static native func GWheel_SetRadioActive(v: Bool) -> Bool;
+
+// Collision / bump feedback. lateralKick is the world-space hit direction
+// dotted with the vehicle's right vector, signed in [-1..+1] (negative =
+// struck on left). The plugin filters out events from non-player vehicles
+// using the handle; we still forward every event for simplicity.
+public static native func GWheel_OnVehicleBump(v: ref<VehicleObject>, lateralKick: Float) -> Bool;
+public static native func GWheel_OnVehicleHit(v: ref<VehicleObject>, lateralKick: Float) -> Bool;
+
+// Per-wheel road material report. Called from the redscript raycast
+// poller (see gwheel_surface.reds) when a wheel's material CName
+// changes. wheelIdx is 0..3, material is the physics material CName
+// (e.g. `asphalt`, `dirt`, `metal`). C++ logs the transition and
+// eventually drives surface-aware FFB off the category.
+public static native func GWheel_OnWheelMaterial(wheelIdx: Int32, material: CName) -> Bool;

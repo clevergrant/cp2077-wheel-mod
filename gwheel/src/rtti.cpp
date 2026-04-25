@@ -8,6 +8,7 @@
 #include "rtti_dump.h"
 #include "rtti_offsets.h"
 #include "sources.h"
+#include "device_table.h"
 
 #include <RED4ext/RED4ext.hpp>
 
@@ -65,6 +66,75 @@ namespace gwheel::rtti
         {
             aFrame->code++;
             if (aOut) *aOut = wheel::IsReady() && wheel::GetCaps().hasFFB;
+        }
+
+        // Wheel-model auto-discovery natives. Read by gwheel_settings.reds at
+        // OnGameAttached and again at PauseMenuGameController.OnInitialize to
+        // drive ModSettings module registration. Strict default: returns FALSE
+        // when no wheel is bound, so the settings page hides every wheel-
+        // specific section until a Logitech wheel binds via the SDK. Unknown
+        // (non-tabled) PIDs DO get the permissive treatment so the UI doesn't
+        // collapse when a new Logitech wheel ships that we haven't catalogued.
+
+        bool DetectedHasRightClusterImpl()
+        {
+            if (!wheel::IsReady()) return false;
+            const auto& caps = wheel::GetCaps();
+            const auto* info = LookupByPid(caps.pid);
+            if (!info) return true;  // unknown PID: permissive
+            return info->has_right_cluster;
+        }
+
+        bool DetectedHasFfbHardwareImpl()
+        {
+            if (!wheel::IsReady()) return false;
+            const auto& caps = wheel::GetCaps();
+            // Prefer the live SDK report (caps.hasFFB) over the table flag.
+            // The SDK knows whether THIS bound device's firmware reported FFB
+            // capability; the table is the historical default. Fall back to
+            // the table for unknown PIDs where the SDK wasn't queried.
+            if (caps.hasFFB) return true;
+            const auto* info = LookupByPid(caps.pid);
+            if (!info) return true;  // unknown PID: permissive
+            return info->ffb_default;
+        }
+
+        bool DetectedHasRevLedsImpl()
+        {
+            if (!wheel::IsReady()) return false;
+            const auto& caps = wheel::GetCaps();
+            const auto* info = LookupByPid(caps.pid);
+            if (!info) return true;  // unknown PID: permissive
+            return info->has_rev_leds;
+        }
+
+        void DetectedHasRightCluster(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        {
+            aFrame->code++;
+            if (aOut) *aOut = DetectedHasRightClusterImpl();
+        }
+
+        void DetectedHasFfbHardware(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        {
+            aFrame->code++;
+            if (aOut) *aOut = DetectedHasFfbHardwareImpl();
+        }
+
+        void DetectedHasRevLeds(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        {
+            aFrame->code++;
+            if (aOut) *aOut = DetectedHasRevLedsImpl();
+        }
+
+        void DetectedModelName(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED4ext::CString* aOut, int64_t)
+        {
+            aFrame->code++;
+            if (!aOut) return;
+            if (!wheel::IsReady()) { *aOut = RED4ext::CString("(no wheel bound)"); return; }
+            const auto& caps = wheel::GetCaps();
+            const auto* info = LookupByPid(caps.pid);
+            if (!info) { *aOut = RED4ext::CString(caps.productName); return; }
+            *aOut = RED4ext::CString(std::string(info->name).c_str());
         }
 
         void ReadConfig(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED4ext::CString* aOut, int64_t)
@@ -286,6 +356,18 @@ namespace gwheel::rtti
             RegisterGlobal(rtti, "GWheel_HasFFB",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&HasFFB),
                            "Bool", {});
+            RegisterGlobal(rtti, "GWheel_DetectedHasRightCluster",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&DetectedHasRightCluster),
+                           "Bool", {});
+            RegisterGlobal(rtti, "GWheel_DetectedHasFfbHardware",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&DetectedHasFfbHardware),
+                           "Bool", {});
+            RegisterGlobal(rtti, "GWheel_DetectedHasRevLeds",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&DetectedHasRevLeds),
+                           "Bool", {});
+            RegisterGlobal(rtti, "GWheel_DetectedModelName",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&DetectedModelName),
+                           "String", {});
             RegisterGlobal(rtti, "GWheel_ReadConfig",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&ReadConfig),
                            "String", {});
@@ -306,6 +388,10 @@ namespace gwheel::rtti
             RegisterGlobal(rtti, "GWheel_SetFfbTorquePct",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetFfbTorquePct>),
                            "Bool", {{ "Int32", "pct" }});
+
+            RegisterGlobal(rtti, "GWheel_SetHandshakePlayOnStart",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetHandshakePlayOnStart>),
+                           "Bool", {{ "Bool", "v" }});
 
             RegisterGlobal(rtti, "GWheel_SetStationaryThresholdMps",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetFloat<&config::SetStationaryThresholdMps>),

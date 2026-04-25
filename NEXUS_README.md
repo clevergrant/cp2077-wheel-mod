@@ -1,6 +1,6 @@
 # Cyberpunk 2077 - Logitech G-series Steering Wheel Mod
 
-**v0.1.0** - ground-up rewrite as a RED4ext C++ plugin. If you used any earlier version of this mod from this project's old Nexus page, uninstall that one completely first; this is a different architecture and a different set of dependencies.
+**v2.31.0** - first release for game patch 2.31, ground-up rewrite as a RED4ext C++ plugin. If you used any earlier version of this mod from this project's old Nexus page, uninstall that one completely first; this is a different architecture and a different set of dependencies.
 
 ## What it does
 

@@ -2,7 +2,7 @@
 
 A RED4ext plugin that gives Cyberpunk 2077 first-class support for Logitech G-series steering wheels. Reads the wheel through the official Logitech Steering Wheel SDK, drives force feedback back to the wheel, injects vehicle input into `Cyberpunk2077.exe` via a direct function detour (no virtual gamepad, no driver install), and exposes settings in the game's own menu.
 
-Version: **0.1.0** — first release of a ground-up rewrite. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
+Version: **2.31.0** — first release for game patch 2.31, ground-up rewrite. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
 ## Features
 
@@ -66,7 +66,7 @@ Extract the release ZIP into your Cyberpunk 2077 install directory. The expected
 ## First run
 
 1. Plug the wheel in and let G HUB pick it up.
-2. Launch the game. The plugin logs to `red4ext/logs/gwheel-*.log`; look for `[gwheel] loaded v0.1.0` and a line naming the detected wheel.
+2. Launch the game. The plugin logs to `red4ext/logs/gwheel-*.log`; look for `[gwheel] loaded v2.31.0` and a line naming the detected wheel.
 3. Open the game's Settings menu → **Mod Settings** → **G-series Wheel**.
 4. In the Advanced section, the first-time tip reads: "Sensitivity, rotation range, and centering spring are managed by G HUB. Enable Advanced → Override G HUB only if you want this mod to take control."
 5. Get in any car. The wheel should steer it.
@@ -111,4 +111,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the internals. PRs welcome, especiall
 
 ## License
 
-TBD — v0.1.0 is unlicensed. A license will be added before the first public Nexus release.
+TBD — v2.31.0 is unlicensed. A license will be added before the first public Nexus release.

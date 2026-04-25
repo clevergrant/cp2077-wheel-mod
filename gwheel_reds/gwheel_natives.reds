@@ -7,12 +7,26 @@ public static native func GWheel_GetDeviceInfo() -> String;
 public static native func GWheel_HasFFB() -> Bool;
 public static native func GWheel_ReadConfig() -> String;
 
+// Wheel-model auto-discovery. Read at OnGameAttached to populate dependency
+// targets that hide controls the bound wheel doesn't physically have.
+// Permissive default (true / "(no wheel bound)") when the SDK hasn't bound
+// yet, so the settings page shows everything until detection is ready.
+public static native func GWheel_DetectedHasRightCluster() -> Bool;
+public static native func GWheel_DetectedHasFfbHardware() -> Bool;
+public static native func GWheel_DetectedHasRevLeds() -> Bool;
+public static native func GWheel_DetectedModelName() -> String;
+
 public static native func GWheel_SetInputEnabled(v: Bool) -> Bool;
 public static native func GWheel_SetClutchAsBrake(v: Bool) -> Bool;
 
 public static native func GWheel_SetFfbEnabled(v: Bool) -> Bool;
 public static native func GWheel_SetFfbDebugLogging(v: Bool) -> Bool;
 public static native func GWheel_SetFfbTorquePct(pct: Int32) -> Bool;
+
+// Startup handshake (LED sweep + 4 triplets + centering breath) on wheel bind.
+// Effective at next wheel bind — toggling mid-session does not retroactively
+// play or cancel a handshake that already fired this session.
+public static native func GWheel_SetHandshakePlayOnStart(v: Bool) -> Bool;
 
 // Phase-1 physics FFB: speed-gated self-centering spring with yaw-rate bonus.
 public static native func GWheel_SetStationaryThresholdMps(mps: Float) -> Bool;

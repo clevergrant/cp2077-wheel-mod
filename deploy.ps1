@@ -45,7 +45,7 @@ function Fail($msg)    {
 
 # ---------- version ---------------------------------------------------------
 
-$version = "0.1.0"
+$version = "2.31.0"
 try {
   $modInfo = Get-Content -Raw "mod_info.json" | ConvertFrom-Json
   if ($modInfo.version) { $version = $modInfo.version }
@@ -179,6 +179,24 @@ if ($Game) {
 
   Copy-Item -Force $dllPath (Join-Path $pluginDir "gwheel.dll")
   Info "Deployed DLL -> $(Join-Path $pluginDir 'gwheel.dll')"
+
+  # Patched mod_settings DLL: vendored fork at vendor/mod_settings/, adds the
+  # `ModSettings.hidden` runtime property so we can register capability flags
+  # as dependency targets without rendering them as user-visible toggles.
+  # API-compatible with upstream — other mods using mod_settings keep working.
+  $patchedModSettingsDll = Join-Path $repoRoot "vendor\mod_settings\build\Release\mod_settings.dll"
+  if (Test-Path $patchedModSettingsDll) {
+    $modSettingsTarget = Join-Path $Game "red4ext\plugins\mod_settings\mod_settings.dll"
+    $modSettingsDir    = Split-Path $modSettingsTarget -Parent
+    if (-not (Test-Path $modSettingsDir)) {
+      Warn "mod_settings folder doesn't exist at $modSettingsDir - install jackhumbert/mod_settings first, then re-run."
+    } else {
+      Copy-Item -Force $patchedModSettingsDll $modSettingsTarget
+      Info "Deployed patched mod_settings.dll -> $modSettingsTarget"
+    }
+  } else {
+    Warn "Patched mod_settings.dll not found at $patchedModSettingsDll - build it from vendor/mod_settings/ first."
+  }
 
   # Logitech Gaming Software / G HUB runtime check. The Logitech SDK the DLL
   # is built against talks to either LGS or G HUB through a shared user-mode

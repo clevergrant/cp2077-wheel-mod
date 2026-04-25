@@ -14,6 +14,7 @@ set(GWHEEL_SOURCES
   src/logging.cpp
   src/audio_monitor.cpp
   src/led.cpp
+  src/mod_settings_seed.cpp
 )
 
 set(GWHEEL_HEADERS
@@ -32,6 +33,7 @@ set(GWHEEL_HEADERS
   src/rtti_offsets.h
   src/audio_monitor.h
   src/led.h
+  src/mod_settings_seed.h
   include/gwheel_abi.h
 )
 

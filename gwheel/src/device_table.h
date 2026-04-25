@@ -10,6 +10,8 @@ namespace gwheel
     enum class Model : uint8_t
     {
         Unknown = 0,
+        WingmanFormulaYellow,
+        WingmanFormulaGp,
         WingmanFormulaForce,
         WingmanFormulaForceGp,
         DrivingForce,
@@ -26,6 +28,8 @@ namespace gwheel
         G923PsPc,
         G923Ps,
         G923,
+        GProRacingPs,
+        GProRacingXbox,
         MomoRacing,
         FormulaVibrationFeedback,
     };
@@ -38,6 +42,8 @@ namespace gwheel
         bool             ffb_default;
         bool             has_clutch;
         bool             has_shifter;
+        bool             has_right_cluster;   // Plus / Minus / Scroll-click cluster on G29/G923/etc.
+        bool             has_rev_leds;        // 10-segment rev-strip on top of the wheel
         uint16_t         steering_range_deg;
     };
 

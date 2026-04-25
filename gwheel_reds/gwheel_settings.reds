@@ -1,100 +1,151 @@
 // In-game settings page for the gwheel mod.
 //
-// Settings live in the game's own Settings menu under "Mod Settings → G-series
-// Wheel", powered by jackhumbert/mod_settings. Mod Settings persists field
-// values across runs; OnModSettingsChange fires whenever the user accepts a
-// change, at which point we push the new values to the red4ext plugin via
-// native functions registered in gwheel.dll.
+// Single GWheelSettings class. Categories (`ModSettings.category` +
+// `ModSettings.category.order`) provide visual grouping on the scrolling
+// settings panel.
 //
-// Design intent: respect Logitech G HUB by default. The "Advanced" section
-// contains every knob that duplicates a G HUB setting; all of those fields
-// are gated on overrideGHub.
+// Capability auto-detection (how the section-hide actually works):
+//
+//   1. Three hidden Bool fields (hasFfbHardware, hasRevLeds, hasRightCluster)
+//      carry the runtime-property `ModSettings.hidden = "true"`. With our
+//      patched mod_settings build they are excluded from the UI list but
+//      still registered as variables.
+//
+//   2. Other settings reference these fields via `ModSettings.dependency`.
+//      mod_settings hides the dependent setting whenever the dependency
+//      target's stored value is not "true".
+//
+//   3. mod_settings reads its stored values from
+//      `red4ext/plugins/mod_settings/user.ini` once at process start. So to
+//      drive the three capability flags from real hardware state we have to
+//      write that file BEFORE mod_settings reads it. That happens in
+//      gwheel.dll's RED4ext OnLoad — see gwheel/src/mod_settings_seed.cpp.
+//      Plugin OnLoads complete before script-data processing, so the
+//      ordering is safe regardless of plugin load order.
+//
+//   4. Important consequence: the UI reflects the wheel state captured at
+//      the moment of process start. Plug or unplug the wheel = restart the
+//      game once for the section list to catch up.
+//
+// `ModSettings.hidden` requires our patched build of mod_settings (a
+// small patch on top of jackhumbert/mod_settings v0.2.21, see
+// vendor/mod_settings/). Plain upstream mod_settings ignores the hidden
+// runtime property and the three capability flags would render as visible
+// Bool toggles. deploy.ps1 ships our patched DLL alongside gwheel.dll.
+//
+// mod_settings dependency evaluation reads from its OWN internal
+// RuntimeVariable<T> storage, NOT from the instance passed to
+// RegisterListenerToClass. Setting capability flags on the listener
+// instance from script does nothing for visibility — the only way to
+// drive them is via user.ini (above). Verified against mod_settings
+// source 2026-04-25.
 
 public class GWheelSettings extends IScriptable {
 
-  // ---- Input --------------------------------------------------------------
+  // ---- Hidden capability flags (auto-set in OnGameAttached) --------------
+  //
+  // ModSettings.hidden = "true" makes these invisible in the settings UI.
+  // Requires our patched mod_settings build (vendor/mod_settings/). Other
+  // fields reference these as `ModSettings.dependency` targets to hide
+  // entire sections on wheels without the relevant hardware.
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.hidden", "true")
+  let hasFfbHardware: Bool = true;
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.hidden", "true")
+  let hasRevLeds: Bool = true;
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.hidden", "true")
+  let hasRightCluster: Bool = true;
+
+  // ---- Wheel input --------------------------------------------------------
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Wheel input")
+  @runtimeProperty("ModSettings.category.order", "100")
   @runtimeProperty("ModSettings.displayName", "Enable wheel input")
-  @runtimeProperty("ModSettings.description", "Master toggle. When off, the mod stops injecting wheel values into vehicle input.")
   let inputEnabled: Bool = true;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Wheel input")
+  @runtimeProperty("ModSettings.category.order", "100")
   @runtimeProperty("ModSettings.displayName", "Treat clutch as brake")
-  @runtimeProperty("ModSettings.description", "Treat the clutch pedal as a second brake. The clutch's softer spring makes it easier to modulate than the stiff brake pedal. Both pedals brake when enabled; whichever is pressed deeper wins.")
+  @runtimeProperty("ModSettings.description", "The clutch acts just like the brake pedal. Useful for stiff brake pedals, since there's no gear system in the game.")
   @runtimeProperty("ModSettings.dependency", "inputEnabled")
-  let clutchAsBrake: Bool = false;
+  let clutchAsBrake: Bool = true;
 
   // ---- Force feedback -----------------------------------------------------
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Force feedback")
+  @runtimeProperty("ModSettings.category.order", "200")
   @runtimeProperty("ModSettings.displayName", "Enable force feedback")
-  @runtimeProperty("ModSettings.description", "Master toggle for plugin-driven FFB: speed-gated self-centering, collision, surface texture. Note: if you toggle this off and then back on mid-session with G HUB's 'Centering Spring in Non Force Feedback Games' checkbox enabled, G HUB's canned spring may persist alongside the mod's physics spring. Workaround: cycle that G HUB checkbox off and on to force G HUB to re-evaluate. This is a G HUB limitation — its Properties API for signaling 'game is now producing FFB again' is broken.")
+  @runtimeProperty("ModSettings.dependency", "hasFfbHardware")
   let ffbEnabled: Bool = true;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.displayName", "Debug logging")
-  @runtimeProperty("ModSettings.description", "Enables verbose plugin logging. Find logs at red4ext/logs/gwheel-*.log.")
-  let ffbDebugLogging: Bool = false;
-
-  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Force feedback")
+  @runtimeProperty("ModSettings.category.order", "200")
   @runtimeProperty("ModSettings.displayName", "FFB strength (%)")
-  @runtimeProperty("ModSettings.description", "Mod-side multiplier on every force this mod generates (spring, active torque, damper, road surface). Composes with G HUB's TRUEFORCE Torque. The Logi Properties API is broken on recent G HUB builds, so we apply the scaling before the effect reaches the SDK rather than via overallGain.")
   @runtimeProperty("ModSettings.min", "0")
   @runtimeProperty("ModSettings.max", "100")
   @runtimeProperty("ModSettings.step", "5")
-  @runtimeProperty("ModSettings.dependency", "ffbEnabled")
+  @runtimeProperty("ModSettings.dependency", "hasFfbHardware")
   let ffbTorquePct: Int32 = 100;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.displayName", "Stationary threshold (m/s)")
-  @runtimeProperty("ModSettings.description", "Below this speed the wheel is free (no centering forces). ~0.5 m/s is a slow walking pace.")
-  @runtimeProperty("ModSettings.min", "0.0")
-  @runtimeProperty("ModSettings.max", "5.0")
-  @runtimeProperty("ModSettings.step", "0.1")
-  @runtimeProperty("ModSettings.dependency", "ffbEnabled")
-  let stationaryThresholdMps: Float = 0.5;
-
-  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Force feedback")
+  @runtimeProperty("ModSettings.category.order", "200")
   @runtimeProperty("ModSettings.displayName", "Cornering feedback (%)")
-  @runtimeProperty("ModSettings.description", "Extra spring stiffness added while the car is rotating hard (cornering, sliding). Approximates dynamic tire alignment torque — hard corners feel heavier than straight-line driving.")
+  @runtimeProperty("ModSettings.description", "Adds spring stiffness while the car is rotating.")
   @runtimeProperty("ModSettings.min", "0")
   @runtimeProperty("ModSettings.max", "100")
   @runtimeProperty("ModSettings.step", "5")
-  @runtimeProperty("ModSettings.dependency", "ffbEnabled")
+  @runtimeProperty("ModSettings.dependency", "hasFfbHardware")
   let yawFeedbackPct: Int32 = 50;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Force feedback")
+  @runtimeProperty("ModSettings.category.order", "200")
   @runtimeProperty("ModSettings.displayName", "Active torque (%)")
-  @runtimeProperty("ModSettings.description", "Active push-back toward center, proportional to speed × steering angle. Models tire alignment torque — the faster you go and the further off-center the wheel is, the harder the car pushes it back. Peak at max deflection + cruise speed. 0 = disabled (passive spring only).")
+  @runtimeProperty("ModSettings.description", "How hard the wheel pushes toward center, scaled by speed and steering angle.")
   @runtimeProperty("ModSettings.min", "0")
   @runtimeProperty("ModSettings.max", "100")
   @runtimeProperty("ModSettings.step", "5")
-  @runtimeProperty("ModSettings.dependency", "ffbEnabled")
+  @runtimeProperty("ModSettings.dependency", "hasFfbHardware")
   let activeTorqueStrengthPct: Int32 = 100;
 
-  // ---- Rev-strip LEDs ---------------------------------------------------
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Force feedback")
+  @runtimeProperty("ModSettings.category.order", "200")
+  @runtimeProperty("ModSettings.displayName", "Stationary threshold (m/s)")
+  @runtimeProperty("ModSettings.description", "Below this speed the wheel has no centering force.")
+  @runtimeProperty("ModSettings.min", "0.0")
+  @runtimeProperty("ModSettings.max", "5.0")
+  @runtimeProperty("ModSettings.step", "0.1")
+  @runtimeProperty("ModSettings.dependency", "hasFfbHardware")
+  let stationaryThresholdMps: Float = 0.5;
+
+  // ---- Rev-strip LEDs -----------------------------------------------------
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Rev-strip LEDs")
+  @runtimeProperty("ModSettings.category.order", "300")
   @runtimeProperty("ModSettings.displayName", "Enable rev-strip LEDs")
-  @runtimeProperty("ModSettings.description", "Drive the 10-segment LED bar on top of the wheel (G29/G920/G923). When off, G HUB's own profile drives the LEDs or they stay dark.")
+  @runtimeProperty("ModSettings.dependency", "hasRevLeds")
   let ledEnabled: Bool = true;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Rev-strip LEDs")
+  @runtimeProperty("ModSettings.category.order", "300")
   @runtimeProperty("ModSettings.displayName", "Rev strip as visualizer while music is playing")
-  @runtimeProperty("ModSettings.description", "When music or other system audio is playing, the LED bar becomes a dynamic-range-normalized visualizer instead of a rev strip. When audio goes silent, falls back to rev-strip (speed-driven) automatically. Works with CP2077's radio, Spotify, YouTube — anything mixing into the default output device.")
-  @runtimeProperty("ModSettings.dependency", "ledEnabled")
+  @runtimeProperty("ModSettings.dependency", "hasRevLeds")
   let ledVisualizerWhileMusic: Bool = true;
 
-  // ---- Wheel hardware ---------------------------------------------------
-  //
-  // Operating range and sensitivity are owned by Logitech G HUB (per-
-  // profile). The mod reads G HUB's current value and auto-scales FFB to
-  // match, so a 900-degree rotation isn't weighed down by SAT meant for a
-  // 180. Change the operating range / sensitivity in G HUB's Cyberpunk
-  // 2077 profile.
-
-  // ---- Button bindings (all user-assignable) -----------------------------
+  // ---- Button bindings (15 controls present on every G-series wheel) -----
   //
   // Every binding here is user-controlled, with no hidden overrides. The
   // D-pad + A defaults are Menu-nav (Up/Down/Left/Right arrow keys and
@@ -107,109 +158,152 @@ public class GWheelSettings extends IScriptable {
   //
   // IMPORTANT: clear the D-pad and A/B/X/Y keyboard bindings in G HUB's
   // Cyberpunk profile. Otherwise G HUB + plugin both fire keyboard
-  // events and you'll get doubled keypresses. Other controls (paddles,
-  // +/-, scroll click, etc.) can still be bound in G HUB if you want,
-  // but the plugin's bindings below are the recommended source of truth.
+  // events and you'll get doubled keypresses.
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "Left paddle shifter")
-  let bindPaddleLeft: GWheelAction = GWheelAction.Handbrake;
+  let bindPaddleLeft: GWheelAction = GWheelAction.ShootPrimary;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "Right paddle shifter")
-  let bindPaddleRight: GWheelAction = GWheelAction.Handbrake;
+  let bindPaddleRight: GWheelAction = GWheelAction.ShootPrimary;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "D-pad Up")
   let bindDpadUp: GWheelAction = GWheelAction.MenuUp;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "D-pad Down")
   let bindDpadDown: GWheelAction = GWheelAction.MenuDown;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "D-pad Left")
   let bindDpadLeft: GWheelAction = GWheelAction.MenuLeft;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "D-pad Right")
   let bindDpadRight: GWheelAction = GWheelAction.MenuRight;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "A button")
   let bindButtonA: GWheelAction = GWheelAction.MenuConfirm;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "B button (in-vehicle)")
-  let bindButtonB: GWheelAction = GWheelAction.None;
+  let bindButtonB: GWheelAction = GWheelAction.Handbrake;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "X button (in-vehicle)")
-  let bindButtonX: GWheelAction = GWheelAction.None;
+  let bindButtonX: GWheelAction = GWheelAction.Horn;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "Y button (in-vehicle)")
-  let bindButtonY: GWheelAction = GWheelAction.None;
+  let bindButtonY: GWheelAction = GWheelAction.Autodrive;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "Start button")
   let bindStart: GWheelAction = GWheelAction.Pause;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "Select / View button")
   let bindSelect: GWheelAction = GWheelAction.OpenMap;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "LSB (left stick click)")
-  let bindLSB: GWheelAction = GWheelAction.Autodrive;
+  let bindLSB: GWheelAction = GWheelAction.OpenPhone;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "RSB (right stick click)")
-  let bindRSB: GWheelAction = GWheelAction.ExitVehicle;
+  let bindRSB: GWheelAction = GWheelAction.RadioMenu;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Button bindings")
+  @runtimeProperty("ModSettings.category.order", "400")
+  @runtimeProperty("ModSettings.displayName", "Xbox / Guide button")
+  let bindXbox: GWheelAction = GWheelAction.ExitVehicle;
+
+  // ---- Lower-cluster bindings (G29 / G923 / G PRO; absent on G920) -------
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Lower-cluster bindings")
+  @runtimeProperty("ModSettings.category.order", "500")
   @runtimeProperty("ModSettings.displayName", "Plus (+) button")
+  @runtimeProperty("ModSettings.dependency", "hasRightCluster")
   let bindPlus: GWheelAction = GWheelAction.CameraCycleForward;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Lower-cluster bindings")
+  @runtimeProperty("ModSettings.category.order", "500")
   @runtimeProperty("ModSettings.displayName", "Minus (-) button")
-  let bindMinus: GWheelAction = GWheelAction.RearViewCamera;
+  @runtimeProperty("ModSettings.dependency", "hasRightCluster")
+  let bindMinus: GWheelAction = GWheelAction.Headlights;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Lower-cluster bindings")
+  @runtimeProperty("ModSettings.category.order", "500")
   @runtimeProperty("ModSettings.displayName", "Scroll click (Return)")
-  let bindScrollClick: GWheelAction = GWheelAction.Horn;
+  @runtimeProperty("ModSettings.dependency", "hasRightCluster")
+  let bindScrollClick: GWheelAction = GWheelAction.HolsterWeapon;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Lower-cluster bindings")
+  @runtimeProperty("ModSettings.category.order", "500")
   @runtimeProperty("ModSettings.displayName", "Scroll clockwise")
+  @runtimeProperty("ModSettings.dependency", "hasRightCluster")
   let bindScrollCW: GWheelAction = GWheelAction.NextWeapon;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
+  @runtimeProperty("ModSettings.category", "Lower-cluster bindings")
+  @runtimeProperty("ModSettings.category.order", "500")
   @runtimeProperty("ModSettings.displayName", "Scroll counter-clockwise")
+  @runtimeProperty("ModSettings.dependency", "hasRightCluster")
   let bindScrollCCW: GWheelAction = GWheelAction.PrevWeapon;
 
+  // ---- Startup ------------------------------------------------------------
+
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Button Bindings")
-  @runtimeProperty("ModSettings.displayName", "Xbox / Guide button")
-  let bindXbox: GWheelAction = GWheelAction.None;
+  @runtimeProperty("ModSettings.category", "Startup")
+  @runtimeProperty("ModSettings.category.order", "600")
+  @runtimeProperty("ModSettings.displayName", "Pon pon shi greeting")
+  @runtimeProperty("ModSettings.description", "Make the wheel dance when the game starts.")
+  let handshakePlayOnStart: Bool = false;
+
+  // ---- Debug --------------------------------------------------------------
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Debug")
+  @runtimeProperty("ModSettings.category.order", "700")
+  @runtimeProperty("ModSettings.displayName", "Debug logging")
+  @runtimeProperty("ModSettings.description", "Logs to red4ext/logs/gwheel-*.log.")
+  let ffbDebugLogging: Bool = false;
 
   // ---- Listener callbacks (invoked by Mod Settings, NOT cb funcs) --------
 
@@ -228,6 +322,8 @@ public class GWheelSettings extends IScriptable {
     GWheel_SetStationaryThresholdMps(this.stationaryThresholdMps);
     GWheel_SetYawFeedbackPct(this.yawFeedbackPct);
     GWheel_SetActiveTorqueStrengthPct(this.activeTorqueStrengthPct);
+
+    GWheel_SetHandshakePlayOnStart(this.handshakePlayOnStart);
 
     GWheel_SetLedEnabled(this.ledEnabled);
     GWheel_SetLedVisualizerWhileMusic(this.ledVisualizerWhileMusic);
@@ -272,6 +368,7 @@ public class GWheelSettings extends IScriptable {
 // the dropdown label inherits the redscript identifier so we use the
 // gameplay-meaningful name here even though the C++ side keeps the older
 // "Backward" naming for historical reasons.
+
 enum GWheelAction {
   None = 0,
 
@@ -329,8 +426,16 @@ enum GWheelAction {
 }
 
 // Attach our settings instance to the player puppet so it lives for the
-// session. On attach, register with Mod Settings and push current values to
-// the native plugin.
+// session and register it as a listener with Mod Settings. The listener
+// receives OnModSettingsChange callbacks when the user clicks Apply in the
+// settings menu — we use that to push the new values into the C++ plugin
+// via the GWheel_Set* natives.
+//
+// The hidden capability flags (hasFfbHardware / hasRevLeds /
+// hasRightCluster) are not seeded here. Mod Settings ignores writes to the
+// listener instance for dependency / visibility purposes. Those flags are
+// driven directly into mod_settings/user.ini from the C++ side at plugin
+// load (see gwheel/src/mod_settings_seed.cpp).
 
 @addField(PlayerPuppet)
 public let m_gwheelSettings: ref<GWheelSettings>;
