@@ -1,3 +1,6 @@
-[submodule "gwheel/vendor/RED4ext.SDK"]
+[submodule "vendor/RED4ext.SDK"]
 	path = vendor/RED4ext.SDK
 	url = https://github.com/WopsS/RED4ext.SDK.git
+[submodule "vendor/mod_settings"]
+	path = vendor/mod_settings
+	url = https://github.com/clevergrant/mod_settings.git

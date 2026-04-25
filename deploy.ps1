@@ -84,16 +84,9 @@ foreach ($f in $fomodConfigFiles) {
   if (-not (Test-Path $f)) { Fail "Missing FOMOD config fragment: $f" }
 }
 
-# Patched mod_settings.dll fork (vendor/mod_settings/) — adds the
-# `ModSettings.hidden` runtime property so capability flags can be
-# registered as dependency targets without showing up as user-visible
-# toggles. API-compatible with upstream jackhumbert/mod_settings v0.2.21.
-# Ships in BOTH zip mode (alongside gwheel.dll, into the same FOMOD) and
-# direct mode (overwrites the user's mod_settings.dll in place).
+# Patched mod_settings.dll fork (vendor/mod_settings/). Built by build.ps1
+# alongside gwheel.dll; the existence check happens after Invoke-Build below.
 $patchedModSettingsDll = Join-Path $repoRoot "vendor\mod_settings\build\Release\mod_settings.dll"
-if (-not (Test-Path $patchedModSettingsDll)) {
-  Fail "Patched mod_settings.dll missing at $patchedModSettingsDll. Build it from vendor/mod_settings/ before deploying."
-}
 
 # ---------- build (if needed) ----------------------------------------------
 
@@ -127,6 +120,14 @@ if (-not (Test-Path $dllPath)) {
 
 $dllSize = (Get-Item $dllPath).Length
 Info "Using DLL: $dllPath ($dllSize bytes)"
+
+# Sanity-check the patched mod_settings.dll. build.ps1 should have produced
+# it as a side effect; if it's missing now, build.ps1 has a bug.
+if (-not (Test-Path $patchedModSettingsDll)) {
+  Fail "Patched mod_settings.dll missing at $patchedModSettingsDll after build. build.ps1 should have produced it."
+}
+$msDllSize = (Get-Item $patchedModSettingsDll).Length
+Info "Using patched mod_settings.dll: $patchedModSettingsDll ($msDllSize bytes)"
 
 # ---------- clean -----------------------------------------------------------
 
