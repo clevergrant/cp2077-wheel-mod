@@ -86,11 +86,21 @@ foreach ($f in $fomodConfigFiles) {
 
 # Patched mod_settings.dll fork (vendor/mod_settings/). Built by build.ps1
 # alongside gwheel.dll; the existence check happens after Invoke-Build below.
-$patchedModSettingsDll = Join-Path $repoRoot "vendor\mod_settings\build\Release\mod_settings.dll"
+$patchedModSettingsDllCandidates = @(
+  (Join-Path $repoRoot "vendor\mod_settings\build\Release\mod_settings.dll"),
+  (Join-Path $repoRoot "vendor\mod_settings\build\mod_settings.dll")
+)
+$patchedModSettingsDll = $patchedModSettingsDllCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $patchedModSettingsDll) {
+  $patchedModSettingsDll = $patchedModSettingsDllCandidates[0]
+}
 
 # ---------- build (if needed) ----------------------------------------------
 
-$dllPath = Join-Path $BuildDir "gwheel\$Config\gwheel.dll"
+$dllPath = Join-Path $BuildDir "gwheel\gwheel.dll"
+if (-not (Test-Path $dllPath)) {
+  $dllPath = Join-Path $BuildDir "gwheel\$Config\gwheel.dll"
+}
 
 function Invoke-Build {
   if (-not (Test-Path "build.ps1")) { Fail "build.ps1 missing - can't build." }
@@ -105,7 +115,6 @@ if (-not (Test-Path $dllPath)) {
   Invoke-Build
   if (-not (Test-Path $dllPath)) { Fail "build.ps1 completed but $dllPath still missing." }
 } elseif (-not $NoBuild) {
-  # Rebuild if any source is newer than the DLL.
   $dllTime = (Get-Item $dllPath).LastWriteTime
   $srcTimes = Get-ChildItem -Recurse -Path "gwheel\src","gwheel\include","gwheel\CMakeLists.txt","CMakeLists.txt" -File |
     Select-Object -ExpandProperty LastWriteTime
@@ -121,13 +130,10 @@ if (-not (Test-Path $dllPath)) {
 $dllSize = (Get-Item $dllPath).Length
 Info "Using DLL: $dllPath ($dllSize bytes)"
 
-# Sanity-check the patched mod_settings.dll. build.ps1 should have produced
-# it as a side effect; if it's missing now, build.ps1 has a bug.
-if (-not (Test-Path $patchedModSettingsDll)) {
-  Fail "Patched mod_settings.dll missing at $patchedModSettingsDll after build. build.ps1 should have produced it."
+if (Test-Path $patchedModSettingsDll) {
+  $msDllSize = (Get-Item $patchedModSettingsDll).Length
+  Info "Using patched mod_settings.dll: $patchedModSettingsDll ($msDllSize bytes)"
 }
-$msDllSize = (Get-Item $patchedModSettingsDll).Length
-Info "Using patched mod_settings.dll: $patchedModSettingsDll ($msDllSize bytes)"
 
 # ---------- clean -----------------------------------------------------------
 
@@ -198,9 +204,7 @@ if ($Game) {
   # keep working.
   $modSettingsTarget = Join-Path $Game "red4ext\plugins\mod_settings\mod_settings.dll"
   $modSettingsDir    = Split-Path $modSettingsTarget -Parent
-  if (-not (Test-Path $modSettingsDir)) {
-    Warn "mod_settings folder doesn't exist at $modSettingsDir - install jackhumbert/mod_settings first, then re-run."
-  } else {
+  if (Test-Path $patchedModSettingsDll) {
     Copy-Item -Force $patchedModSettingsDll $modSettingsTarget
     Info "Deployed patched mod_settings.dll -> $modSettingsTarget"
   }

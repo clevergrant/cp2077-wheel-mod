@@ -1,402 +1,417 @@
-// input_probe — standalone Logi SDK console tool that prints every button
-// edge, POV change, and significant axis delta so we can empirically map
-// the physical controls of a connected Logitech wheel to their DInput
-// indices. Used to build the per-device input layout for the binding UI.
+// input_probe — standalone DirectInput hardware diagnostic and telemetry probe
+// for the Cyberpunk 2077 Flight Yoke and Steering Wheel mod.
 //
 // Usage:
-//   input_probe.exe          -> runs until killed (Ctrl+C or external)
-//   input_probe.exe 30       -> auto-exits after 30 seconds
-//   input_probe.exe prompt   -> interactive prompted pass-through test:
-//                               walks through every physical control, for
-//                               each one waits for the user to press it
-//                               on the wheel, times out after 15s. Writes
-//                               a machine-readable summary to
-//                               input_probe_results.txt in the CWD. Used
-//                               to verify what G HUB's active profile is
-//                               and is not passing through to DInput.
-//
-// Requires G HUB (or LGS) running and the wheel NOT claimed by another
-// SDK session (so close CP2077 first).
+//   input_probe.exe          -> live real-time hardware telemetry monitor (Press 'q' or Esc to quit)
+//   input_probe.exe once     -> captures 1 frame snapshot and exits immediately
+//   input_probe.exe 5        -> runs telemetry for 5 seconds and exits
 
 #define DIRECTINPUT_VERSION 0x0800
 #include <windows.h>
 #include <dinput.h>
 #include <conio.h>
-#include <LogitechSteeringWheelLib.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cmath>
 #include <cstring>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace
 {
-    const char* PovLabel(DWORD pov)
+    struct DeviceEntry
     {
-        if (pov == 0xFFFFFFFF) return "CENTER";
-        switch (pov)
-        {
-        case 0:     return "UP";
-        case 4500:  return "UP-RIGHT";
-        case 9000:  return "RIGHT";
-        case 13500: return "DOWN-RIGHT";
-        case 18000: return "DOWN";
-        case 22500: return "DOWN-LEFT";
-        case 27000: return "LEFT";
-        case 31500: return "UP-LEFT";
-        default:    return "?";
-        }
-    }
-}
-
-namespace
-{
-    // ---- Prompted pass-through mode ----------------------------------------
-    //
-    // For each named step, wait until either:
-    //   - any button rising edge or POV direction change arrives, OR
-    //   - the user presses Enter in the console (marks SKIPPED), OR
-    //   - 15 seconds pass with no input (marks TIMEOUT — treated same as
-    //     SKIPPED / suppressed by driver).
-    // Records what was observed to a summary file so the caller (that's me,
-    // Claude) can decide whether the Logi SDK is seeing each physical
-    // control under the current G HUB profile.
-
-    struct Step { const char* label; };
-
-    constexpr Step kSteps[] = {
-        { "Left paddle"          },
-        { "Right paddle"         },
-        { "A"                    },
-        { "B"                    },
-        { "X"                    },
-        { "Y"                    },
-        { "D-pad Up"             },
-        { "D-pad Down"           },
-        { "D-pad Left"           },
-        { "D-pad Right"          },
-        { "Start (menu)"         },
-        { "Select / View"        },
-        { "LSB (left stick click)"  },
-        { "RSB (right stick click)" },
-        { "Plus (+)"             },
-        { "Minus (-)"            },
-        { "Scroll click"         },
-        { "Scroll CW"            },
-        { "Scroll CCW"           },
-        { "Xbox / Guide"         },
-    };
-    constexpr int kStepCount = static_cast<int>(sizeof(kSteps) / sizeof(kSteps[0]));
-
-    struct Probe
-    {
-        uint32_t buttons = 0;
-        DWORD    pov     = 0xFFFFFFFF;
+        GUID instanceGuid = {};
+        uint16_t vid = 0;
+        uint16_t pid = 0;
+        std::string name;
+        std::string role;
+        bool isFlightYoke = false;
+        bool isRudderPedals = false;
+        bool isWheel = false;
+        bool hasFFB = false;
+        LPDIRECTINPUTDEVICE8 dev = nullptr;
     };
 
-    Probe ReadProbe(int idx)
+    float NormalizeBipolar(LONG v)
     {
-        Probe p;
-        const DIJOYSTATE2* raw = LogiGetState(idx);
-        if (!raw) return p;
-        for (int i = 0; i < 32; ++i)
-            if (raw->rgbButtons[i] & 0x80) p.buttons |= (1u << i);
-        p.pov = raw->rgdwPOV[0];
-        return p;
+        return std::clamp((static_cast<float>(v) - 32767.5f) / 32767.5f, -1.f, 1.f);
     }
 
-    int RunPromptedMode(int idx, const wchar_t* wheelName)
+    float NormalizeUnipolar(LONG v, bool invert)
     {
-        std::FILE* fp = std::fopen("input_probe_results.txt", "w");
-        if (fp)
+        float t = std::clamp(static_cast<float>(v) / 65535.f, 0.f, 1.f);
+        if (invert) t = 1.0f - t;
+        return t;
+    }
+
+    float NormalizeTFRPPedal(LONG raw)
+    {
+        if (raw >= 60000) return 0.0f;
+        float norm = static_cast<float>(60000 - raw) / 55000.0f;
+        return std::clamp(norm, 0.0f, 1.0f);
+    }
+
+    std::string MakeBar(float val, float minVal, float maxVal, int width = 24)
+    {
+        float norm = (val - minVal) / (maxVal - minVal);
+        norm = std::clamp(norm, 0.0f, 1.0f);
+        int pos = static_cast<int>(norm * width);
+        std::string s(width, ' ');
+        if (minVal < 0.0f && maxVal > 0.0f)
         {
-            std::fprintf(fp, "# input_probe prompted pass-through run\n");
-            std::fprintf(fp, "# wheel=%ls (SDK slot %d)\n", wheelName, idx);
-            std::fprintf(fp, "# columns: step=<label> outcome=<DETECTED|SKIPPED|TIMEOUT> detail=<what arrived>\n");
-            std::fflush(fp);
-        }
-
-        std::printf("\n");
-        std::printf("===============================================\n");
-        std::printf(" PROMPTED PASS-THROUGH TEST\n");
-        std::printf("===============================================\n");
-        std::printf(" For each step:\n");
-        std::printf("   - press the physical control on the wheel, OR\n");
-        std::printf("   - press ENTER in this console to skip it.\n");
-        std::printf(" Each step auto-skips after 15 seconds.\n");
-        std::printf(" Keep your hands off everything else between steps.\n");
-        std::printf("===============================================\n\n");
-
-        // Consume any stray keypresses already queued up.
-        while (_kbhit()) (void)_getch();
-
-        // Establish baseline from current state (in case something is held).
-        LogiUpdate();
-        Probe base = ReadProbe(idx);
-
-        int detected = 0, skipped = 0, timedOut = 0;
-
-        for (int s = 0; s < kStepCount; ++s)
-        {
-            std::printf("[%2d/%d] press: %-28s ", s + 1, kStepCount, kSteps[s].label);
-            std::fflush(stdout);
-
-            auto start = std::chrono::steady_clock::now();
-            bool gotInput = false;
-            bool userSkipped = false;
-            std::string detail;
-
-            while (true)
+            int center = width / 2;
+            s[center] = '|';
+            if (pos < center)
             {
-                auto elapsed = std::chrono::steady_clock::now() - start;
-                if (elapsed > std::chrono::seconds(15)) break;
-
-                LogiUpdate();
-                Probe cur = ReadProbe(idx);
-
-                // Any rising button edge since baseline wins.
-                uint32_t rising = cur.buttons & ~base.buttons;
-                if (rising)
-                {
-                    int bit = 0;
-                    while (bit < 32 && !(rising & (1u << bit))) ++bit;
-                    char buf[96];
-                    std::snprintf(buf, sizeof(buf),
-                                  "button bit %d (mask 0x%08x)", bit, rising);
-                    detail = buf;
-                    gotInput = true;
-
-                    // Wait for release so the next step starts clean.
-                    while (true)
-                    {
-                        LogiUpdate();
-                        Probe r = ReadProbe(idx);
-                        if ((r.buttons & rising) == 0) { base = r; break; }
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                    }
-                    break;
-                }
-
-                // POV direction change (center -> direction).
-                if (cur.pov != base.pov && cur.pov != 0xFFFFFFFF)
-                {
-                    char buf[96];
-                    std::snprintf(buf, sizeof(buf),
-                                  "POV %lu (%s)", cur.pov, PovLabel(cur.pov));
-                    detail = buf;
-                    gotInput = true;
-
-                    // Wait for POV to return to center.
-                    while (true)
-                    {
-                        LogiUpdate();
-                        Probe r = ReadProbe(idx);
-                        if (r.pov == 0xFFFFFFFF) { base = r; break; }
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                    }
-                    break;
-                }
-
-                // Enter key in console = skip this step.
-                if (_kbhit())
-                {
-                    int c = _getch();
-                    if (c == '\r' || c == '\n')
-                    {
-                        userSkipped = true;
-                        break;
-                    }
-                }
-
-                std::this_thread::sleep_for(std::chrono::milliseconds(12));
+                for (int i = pos; i < center; ++i) s[i] = '<';
             }
-
-            const char* outcome;
-            if (gotInput)             { outcome = "DETECTED";  ++detected; }
-            else if (userSkipped)     { outcome = "SKIPPED";   ++skipped;  }
-            else                      { outcome = "TIMEOUT";   ++timedOut; }
-
-            if (gotInput)
-                std::printf("-> %s  (%s)\n", outcome, detail.c_str());
-            else
-                std::printf("-> %s\n", outcome);
-
-            if (fp)
+            else if (pos > center)
             {
-                std::fprintf(fp, "step=\"%s\" outcome=%s detail=\"%s\"\n",
-                             kSteps[s].label, outcome, detail.c_str());
-                std::fflush(fp);
+                for (int i = center + 1; i <= pos && i < width; ++i) s[i] = '>';
             }
         }
-
-        std::printf("\n===============================================\n");
-        std::printf(" summary: DETECTED=%d SKIPPED=%d TIMEOUT=%d (of %d)\n",
-                    detected, skipped, timedOut, kStepCount);
-        std::printf("===============================================\n");
-        std::printf(" results file: input_probe_results.txt\n");
-        std::printf("\nPress Enter to close this window...\n");
-        std::fflush(stdout);
-
-        if (fp)
+        else
         {
-            std::fprintf(fp, "# summary: DETECTED=%d SKIPPED=%d TIMEOUT=%d\n",
-                         detected, skipped, timedOut);
-            std::fclose(fp);
+            for (int i = 0; i < pos && i < width; ++i) s[i] = '#';
         }
-
-        // Drain any buffered input, then wait for Enter.
-        while (_kbhit()) (void)_getch();
-        int c;
-        while ((c = std::getchar()) != EOF && c != '\n') {}
-        return 0;
+        return "[" + s + "]";
     }
 }
 
 int main(int argc, char** argv)
 {
-    long long maxSeconds = 0; // 0 == infinite
-    bool prompted = false;
+    int runSeconds = 0;
+    bool once = false;
     if (argc > 1)
     {
-        if (std::strcmp(argv[1], "prompt") == 0) prompted = true;
-        else                                     maxSeconds = std::atoll(argv[1]);
+        if (std::strcmp(argv[1], "once") == 0) once = true;
+        else runSeconds = std::atoi(argv[1]);
     }
 
-    // Hidden top-level window for DInput acquisition.
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD dwMode = 0;
+    if (GetConsoleMode(hOut, &dwMode))
+    {
+        SetConsoleMode(hOut, dwMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    }
+
+    CONSOLE_CURSOR_INFO cci;
+    cci.dwSize = 25;
+    cci.bVisible = once ? TRUE : FALSE;
+    if (!once) SetConsoleCursorInfo(hOut, &cci);
+
     HINSTANCE hinst = GetModuleHandleW(nullptr);
+
+    LPDIRECTINPUT8 dinput = nullptr;
+    HRESULT hr = DirectInput8Create(hinst, DIRECTINPUT_VERSION, IID_IDirectInput8W,
+                                   reinterpret_cast<void**>(&dinput), nullptr);
+    if (FAILED(hr) || !dinput)
+    {
+        std::printf("Error: DirectInput8Create failed: 0x%08lX\n", static_cast<unsigned long>(hr));
+        return 1;
+    }
+
+    std::vector<DeviceEntry> devices;
+
+    dinput->EnumDevices(DI8DEVCLASS_GAMECTRL, [](LPCDIDEVICEINSTANCEW inst, LPVOID ud) -> BOOL {
+        auto* list = reinterpret_cast<std::vector<DeviceEntry>*>(ud);
+        DeviceEntry e;
+        e.instanceGuid = inst->guidInstance;
+        e.vid = static_cast<uint16_t>(inst->guidProduct.Data1 & 0xFFFF);
+        e.pid = static_cast<uint16_t>(inst->guidProduct.Data1 >> 16);
+        char nameBuf[512] = {};
+        WideCharToMultiByte(CP_UTF8, 0, inst->tszProductName, -1, nameBuf, sizeof(nameBuf), nullptr, nullptr);
+        e.name = nameBuf;
+
+        std::string lower = e.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+
+        if (e.vid == 0x044F || lower.find("rudder") != std::string::npos ||
+            lower.find("pedal") != std::string::npos || lower.find("tfrp") != std::string::npos ||
+            lower.find("tpr") != std::string::npos)
+        {
+            e.isRudderPedals = true;
+            e.role = "RUDDER PEDALS";
+        }
+        else if (e.vid == 0x346E || e.vid == 0x0483 || lower.find("moza") != std::string::npos)
+        {
+            if (lower.find("ay") != std::string::npos || lower.find("yoke") != std::string::npos ||
+                lower.find("flight") != std::string::npos || lower.find("ab9") != std::string::npos ||
+                e.pid == 0x1001 || e.pid == 0x1002 || e.pid == 0x0020 || e.pid == 0x0021 ||
+                e.pid == 0x0022 || e.pid == 0x0023)
+            {
+                e.isFlightYoke = true;
+                e.role = "FLIGHT YOKE";
+            }
+            else
+            {
+                e.isWheel = true;
+                e.role = "RACING WHEEL";
+            }
+            e.hasFFB = true;
+        }
+        else if (e.vid == 0x046D || lower.find("logitech") != std::string::npos ||
+                 lower.find("g29") != std::string::npos || lower.find("g920") != std::string::npos ||
+                 lower.find("g923") != std::string::npos || lower.find("g pro") != std::string::npos)
+        {
+            e.isWheel = true;
+            e.hasFFB = true;
+            e.role = "RACING WHEEL";
+        }
+        else if (lower.find("yoke") != std::string::npos)
+        {
+            e.isFlightYoke = true;
+            e.role = "FLIGHT YOKE";
+        }
+        else if (lower.find("wheel") != std::string::npos)
+        {
+            e.isWheel = true;
+            e.role = "RACING WHEEL";
+        }
+        else
+        {
+            e.role = "GAME CONTROLLER";
+        }
+
+        list->push_back(e);
+        return DIENUM_CONTINUE;
+    }, &devices, DIEDFL_ATTACHEDONLY);
+
+    if (devices.empty())
+    {
+        std::printf("No DirectInput game controllers found.\n");
+        dinput->Release();
+        return 0;
+    }
+
+    int primaryIdx = -1;
+    int pedalIdx = -1;
+
+    for (size_t i = 0; i < devices.size(); ++i)
+    {
+        if (devices[i].isRudderPedals && pedalIdx < 0)
+        {
+            pedalIdx = static_cast<int>(i);
+            break;
+        }
+    }
+
+    for (size_t i = 0; i < devices.size(); ++i)
+    {
+        if ((devices[i].isFlightYoke || devices[i].isWheel) && primaryIdx < 0)
+        {
+            primaryIdx = static_cast<int>(i);
+            break;
+        }
+    }
+
+    if (primaryIdx < 0)
+    {
+        for (size_t i = 0; i < devices.size(); ++i)
+        {
+            if (!devices[i].isRudderPedals && primaryIdx < 0)
+            {
+                primaryIdx = static_cast<int>(i);
+                break;
+            }
+        }
+    }
+
+    // Create background host window for device acquisition
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = DefWindowProcW;
     wc.hInstance = hinst;
-    wc.lpszClassName = L"gwheel_input_probe";
+    wc.lpszClassName = L"GWheelProbeHost";
     RegisterClassExW(&wc);
-    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"input_probe",
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 400, 300,
-        nullptr, nullptr, hinst, nullptr);
+    HWND hostHwnd = CreateWindowExW(WS_EX_TOPMOST, wc.lpszClassName, L"GWheel Probe Host",
+                                    WS_POPUP, 0, 0, 100, 100, nullptr, nullptr, hinst, nullptr);
 
-    if (!LogiSteeringInitializeWithWindow(false, hwnd))
+    for (size_t i = 0; i < devices.size(); ++i)
     {
-        std::printf("LogiSteeringInitialize failed. Close CP2077 and make sure G HUB is running.\n");
-        return 1;
-    }
-
-    int idx = -1;
-    for (int i = 0; i < 60 && idx < 0; ++i)
-    {
-        LogiUpdate();
-        for (int j = 0; j < LOGI_MAX_CONTROLLERS; ++j)
+        auto& d = devices[i];
+        LPDIRECTINPUTDEVICE8 dev = nullptr;
+        if (SUCCEEDED(dinput->CreateDevice(d.instanceGuid, &dev, nullptr)) && dev)
         {
-            if (LogiIsConnected(j) && LogiIsDeviceConnected(j, LOGI_DEVICE_TYPE_WHEEL)) { idx = j; break; }
+            dev->SetDataFormat(&c_dfDIJoystick2);
+            dev->SetCooperativeLevel(hostHwnd, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE);
+            dev->Acquire();
+
+            DIDEVCAPS caps{};
+            caps.dwSize = sizeof(DIDEVCAPS);
+            if (SUCCEEDED(dev->GetCapabilities(&caps)))
+            {
+                if (caps.dwFlags & DIDC_FORCEFEEDBACK)
+                {
+                    d.hasFFB = true;
+                }
+            }
+            d.dev = dev;
         }
-        if (idx < 0) std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-    if (idx < 0)
+
+    if (!once)
     {
-        std::printf("no wheel detected within 3s\n");
-        LogiSteeringShutdown();
-        return 2;
+        std::printf("\033[2J\033[H");
     }
 
-    wchar_t name[256] = {};
-    LogiGetFriendlyProductName(idx, name, 256);
-    std::wprintf(L"bound to %s (slot %d)\n", name, idx);
-    std::fflush(stdout);
-
-    if (prompted)
-    {
-        return RunPromptedMode(idx, name);
-    }
-
-    std::printf("---\n");
-    std::printf("press each physical control once with a ~1s pause.\n");
-    std::printf("axis noise gate = 1000 counts; steering/pedals are suppressed.\n");
-    std::printf("---\n");
-    std::fflush(stdout);
-
-    auto now_ms = []() {
-        auto t = std::chrono::steady_clock::now().time_since_epoch();
-        return std::chrono::duration_cast<std::chrono::milliseconds>(t).count();
-    };
-    const long long start = now_ms();
-
-    uint32_t prevButtons = 0;
-    DWORD prevPov = 0;
-    LONG prevLZ = 0, prevLRx = 0, prevLRy = 0, prevSl0 = 0, prevSl1 = 0;
-    bool firstTick = true;
+    auto startTime = std::chrono::steady_clock::now();
+    std::vector<DIJOYSTATE2> states(devices.size());
+    std::vector<LONG> minLX(devices.size(), 65535), maxLX(devices.size(), 0);
+    std::vector<LONG> minLY(devices.size(), 65535), maxLY(devices.size(), 0);
+    std::vector<LONG> minLZ(devices.size(), 65535), maxLZ(devices.size(), 0);
 
     while (true)
     {
-        LogiUpdate();
-        const DIJOYSTATE2* raw = LogiGetState(idx);
-        const long long t = now_ms() - start;
-        if (maxSeconds > 0 && t > maxSeconds * 1000) break;
-        if (!raw) { std::this_thread::sleep_for(std::chrono::milliseconds(16)); continue; }
-
-        uint32_t bits = 0;
-        for (int i = 0; i < 32; ++i)
-            if (raw->rgbButtons[i] & 0x80) bits |= (1u << i);
-
-        const DWORD pov = raw->rgdwPOV[0];
-
-        if (firstTick)
+        for (size_t i = 0; i < devices.size(); ++i)
         {
-            firstTick = false;
-            prevButtons = bits;
-            prevPov = pov;
-            prevLZ = raw->lZ;
-            prevLRx = raw->lRx;
-            prevLRy = raw->lRy;
-            prevSl0 = raw->rglSlider[0];
-            prevSl1 = raw->rglSlider[1];
-            std::printf("t=%lldms  INITIAL  buttons=0x%08X  pov=%u(%s)  "
-                        "lZ=%ld lRx=%ld lRy=%ld sl0=%ld sl1=%ld\n",
-                        t, bits, pov, PovLabel(pov),
-                        raw->lZ, raw->lRx, raw->lRy,
-                        raw->rglSlider[0], raw->rglSlider[1]);
-            std::fflush(stdout);
-        }
-        else
-        {
-            uint32_t rising  = bits & ~prevButtons;
-            uint32_t falling = prevButtons & ~bits;
-            for (int i = 0; i < 32; ++i)
+            if (devices[i].dev)
             {
-                if (rising  & (1u << i)) std::printf("t=%lldms  BUTTON %2d  DOWN\n", t, i);
-                if (falling & (1u << i)) std::printf("t=%lldms  BUTTON %2d  UP\n",   t, i);
-            }
-            if (pov != prevPov)
-                std::printf("t=%lldms  POV  %u(%s) -> %u(%s)\n",
-                            t, prevPov, PovLabel(prevPov), pov, PovLabel(pov));
-
-            auto axisCheck = [&](const char* label, LONG cur, LONG& prev) {
-                LONG diff = cur - prev;
-                if (diff > 1000 || diff < -1000)
+                DIJOYSTATE2 js{};
+                devices[i].dev->Poll();
+                HRESULT getHr = devices[i].dev->GetDeviceState(sizeof(DIJOYSTATE2), &js);
+                if (FAILED(getHr))
                 {
-                    std::printf("t=%lldms  AXIS %s  %ld -> %ld (delta %+ld)\n",
-                                t, label, prev, cur, diff);
-                    prev = cur;
+                    devices[i].dev->Acquire();
+                    getHr = devices[i].dev->GetDeviceState(sizeof(DIJOYSTATE2), &js);
                 }
-            };
-            axisCheck("lZ", raw->lZ, prevLZ);
-            axisCheck("lRx", raw->lRx, prevLRx);
-            axisCheck("lRy", raw->lRy, prevLRy);
-            axisCheck("slider0", raw->rglSlider[0], prevSl0);
-            axisCheck("slider1", raw->rglSlider[1], prevSl1);
-
-            prevButtons = bits;
-            prevPov = pov;
-
-            if (rising || falling || pov != prevPov) std::fflush(stdout);
+                if (SUCCEEDED(getHr))
+                {
+                    states[i] = js;
+                    minLX[i] = std::min(minLX[i], js.lX); maxLX[i] = std::max(maxLX[i], js.lX);
+                    minLY[i] = std::min(minLY[i], js.lY); maxLY[i] = std::max(maxLY[i], js.lY);
+                    minLZ[i] = std::min(minLZ[i], js.lZ); maxLZ[i] = std::max(maxLZ[i], js.lZ);
+                }
+            }
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        if (_kbhit())
+        {
+            int ch = _getch();
+            if (ch == 'q' || ch == 'Q' || ch == 27) // 'q' or Esc
+                break;
+        }
+
+        if (!once)
+        {
+            SetConsoleCursorPosition(hOut, { 0, 0 });
+        }
+
+        std::string frame;
+        frame.reserve(4096);
+
+        frame += "===============================================================================\033[K\n";
+        frame += "          CYBERPUNK 2077 FLIGHT YOKE & WHEEL DIRECTINPUT PROBE                 \033[K\n";
+        frame += "===============================================================================\033[K\n";
+        frame += "Detected " + std::to_string(devices.size()) + " connected device(s):\033[K\n";
+        for (size_t i = 0; i < devices.size(); ++i)
+        {
+            const auto& d = devices[i];
+            char devLine[256];
+            std::snprintf(devLine, sizeof(devLine), "  [%zu] [VID:0x%04X PID:0x%04X] %-32s [%s]%s\033[K\n",
+                          i, d.vid, d.pid, d.name.c_str(), d.role.c_str(),
+                          d.hasFFB ? " (FFB Capable)" : "");
+            frame += devLine;
+        }
+        frame += "-------------------------------------------------------------------------------\033[K\n";
+        frame += ">>> LIVE DEVICE TELEMETRY <<<\033[K\n";
+        for (size_t i = 0; i < devices.size(); ++i)
+        {
+            const auto& js = states[i];
+            uint32_t btnMask = 0;
+            for (int b = 0; b < 32; ++b) if (js.rgbButtons[b] & 0x80) btnMask |= (1u << b);
+
+            uint32_t pov = (LOWORD(js.rgdwPOV[0]) != 0xFFFF) ? js.rgdwPOV[0] : 0xFFFF;
+
+            char rawLine[512];
+            std::snprintf(rawLine, sizeof(rawLine),
+                          "  [%zu] %-18s | X:%6ld [%5ld-%5ld] | Y:%6ld [%5ld-%5ld] | Z:%6ld [%5ld-%5ld] | Btn:0x%08X | POV:%5u\033[K\n",
+                          i, devices[i].name.substr(0, 18).c_str(),
+                          js.lX, minLX[i], maxLX[i],
+                          js.lY, minLY[i], maxLY[i],
+                          js.lZ, minLZ[i], maxLZ[i],
+                          btnMask, pov);
+            frame += rawLine;
+        }
+
+        frame += "-------------------------------------------------------------------------------\033[K\n";
+        if (primaryIdx >= 0)
+        {
+            const auto& js = states[primaryIdx];
+            float steer = NormalizeBipolar(js.lX);
+            float pitch = NormalizeBipolar(js.lY);
+            char line[256];
+            std::snprintf(line, sizeof(line), "  PRIMARY STEER / ROLL (lX) : %+.3f  %-26s\033[K\n",
+                          steer, MakeBar(steer, -1.0f, 1.0f).c_str());
+            frame += line;
+            if (devices[primaryIdx].isFlightYoke)
+            {
+                std::snprintf(line, sizeof(line), "  PRIMARY PITCH / ELEV (lY) : %+.3f  %-26s\033[K\n",
+                              pitch, MakeBar(pitch, -1.0f, 1.0f).c_str());
+                frame += line;
+            }
+        }
+
+        if (pedalIdx >= 0)
+        {
+            const auto& js = states[pedalIdx];
+            float rightToe = NormalizeTFRPPedal(js.lX);
+            float leftToe = NormalizeTFRPPedal(js.lY);
+            float rudderYaw = NormalizeBipolar(js.lZ);
+            char line[256];
+            std::snprintf(line, sizeof(line), "  THROTTLE / RIGHT TOE (lX) : %5.3f  %-26s (Raw: %5ld)\033[K\n",
+                          rightToe, MakeBar(rightToe, 0.0f, 1.0f).c_str(), js.lX);
+            frame += line;
+            std::snprintf(line, sizeof(line), "  BRAKE / LEFT TOE     (lY) : %5.3f  %-26s (Raw: %5ld)\033[K\n",
+                          leftToe, MakeBar(leftToe, 0.0f, 1.0f).c_str(), js.lY);
+            frame += line;
+            std::snprintf(line, sizeof(line), "  RUDDER SLIDER / YAW  (lZ) : %+.3f  %-26s (Raw: %5ld)\033[K\n",
+                          rudderYaw, MakeBar(rudderYaw, -1.0f, 1.0f).c_str(), js.lZ);
+            frame += line;
+        }
+
+        if (!once)
+        {
+            frame += "-------------------------------------------------------------------------------\033[K\n";
+            frame += "  Press [Q] or [Esc] to exit.\033[K\n";
+        }
+
+        std::fwrite(frame.data(), 1, frame.size(), stdout);
+        std::fflush(stdout);
+
+        if (once) break;
+
+        auto now = std::chrono::steady_clock::now();
+        if (runSeconds > 0 && (now - startTime) > std::chrono::seconds(runSeconds))
+            break;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30 Hz
     }
 
-    LogiSteeringShutdown();
-    std::printf("done.\n");
+    for (auto& d : devices)
+    {
+        if (d.dev)
+        {
+            d.dev->Unacquire();
+            d.dev->Release();
+        }
+    }
+    dinput->Release();
+    DestroyWindow(hostHwnd);
+
+    if (!once)
+    {
+        cci.bVisible = TRUE;
+        SetConsoleCursorInfo(hOut, &cci);
+        std::printf("\nProbe finished.\n");
+    }
+
     return 0;
 }

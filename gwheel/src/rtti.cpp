@@ -9,6 +9,7 @@
 #include "rtti_offsets.h"
 #include "sources.h"
 #include "device_table.h"
+#include "dinput_manager.h"
 
 #include <RED4ext/RED4ext.hpp>
 
@@ -46,17 +47,16 @@ namespace gwheel::rtti
             if (!aOut) return;
             if (!wheel::IsReady())
             {
-                *aOut = RED4ext::CString("no wheel connected (Logitech SDK has not bound a device yet)");
+                *aOut = RED4ext::CString("no controller connected");
                 return;
             }
             const auto& caps = wheel::GetCaps();
             char buf[512];
             std::snprintf(buf, sizeof(buf),
-                          "%s (%d deg, FFB=%s, SDK=%d.%d.%d) -> hook:%s fireCount=%llu",
+                          "%s (%d deg, FFB=%s) -> hook:%s fireCount=%llu",
                           caps.productName,
                           caps.operatingRangeDeg,
                           caps.hasFFB ? "yes" : "no",
-                          caps.sdkMajor, caps.sdkMinor, caps.sdkBuild,
                           vehicle_hook::IsInstalled() ? "installed" : "not-installed",
                           static_cast<unsigned long long>(vehicle_hook::FireCount()));
             *aOut = RED4ext::CString(buf);
@@ -68,35 +68,19 @@ namespace gwheel::rtti
             if (aOut) *aOut = wheel::IsReady() && wheel::GetCaps().hasFFB;
         }
 
-        // Wheel-model auto-discovery natives. Read by gwheel_settings.reds at
-        // OnGameAttached and again at PauseMenuGameController.OnInitialize to
-        // drive ModSettings module registration. Strict default: returns FALSE
-        // when no wheel is bound, so the settings page hides every wheel-
-        // specific section until a Logitech wheel binds via the SDK. Unknown
-        // (non-tabled) PIDs DO get the permissive treatment so the UI doesn't
-        // collapse when a new Logitech wheel ships that we haven't catalogued.
-
         bool DetectedHasRightClusterImpl()
         {
             if (!wheel::IsReady()) return false;
             const auto& caps = wheel::GetCaps();
             const auto* info = LookupByPid(caps.pid);
-            if (!info) return true;  // unknown PID: permissive
+            if (!info) return false;
             return info->has_right_cluster;
         }
 
         bool DetectedHasFfbHardwareImpl()
         {
             if (!wheel::IsReady()) return false;
-            const auto& caps = wheel::GetCaps();
-            // Prefer the live SDK report (caps.hasFFB) over the table flag.
-            // The SDK knows whether THIS bound device's firmware reported FFB
-            // capability; the table is the historical default. Fall back to
-            // the table for unknown PIDs where the SDK wasn't queried.
-            if (caps.hasFFB) return true;
-            const auto* info = LookupByPid(caps.pid);
-            if (!info) return true;  // unknown PID: permissive
-            return info->ffb_default;
+            return wheel::GetCaps().hasFFB;
         }
 
         bool DetectedHasRevLedsImpl()
@@ -104,8 +88,18 @@ namespace gwheel::rtti
             if (!wheel::IsReady()) return false;
             const auto& caps = wheel::GetCaps();
             const auto* info = LookupByPid(caps.pid);
-            if (!info) return true;  // unknown PID: permissive
+            if (!info) return false;
             return info->has_rev_leds;
+        }
+
+        bool DetectedHasYokeHardwareImpl()
+        {
+            return DInputManager::Instance().HasFlightYoke();
+        }
+
+        bool DetectedHasRudderPedalsImpl()
+        {
+            return DInputManager::Instance().HasRudderPedals();
         }
 
         void DetectedHasRightCluster(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
@@ -126,15 +120,25 @@ namespace gwheel::rtti
             if (aOut) *aOut = DetectedHasRevLedsImpl();
         }
 
+        void DetectedHasYokeHardware(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        {
+            aFrame->code++;
+            if (aOut) *aOut = DetectedHasYokeHardwareImpl();
+        }
+
+        void DetectedHasRudderPedals(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        {
+            aFrame->code++;
+            if (aOut) *aOut = DetectedHasRudderPedalsImpl();
+        }
+
         void DetectedModelName(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED4ext::CString* aOut, int64_t)
         {
             aFrame->code++;
             if (!aOut) return;
-            if (!wheel::IsReady()) { *aOut = RED4ext::CString("(no wheel bound)"); return; }
+            if (!wheel::IsReady()) { *aOut = RED4ext::CString("(no controller bound)"); return; }
             const auto& caps = wheel::GetCaps();
-            const auto* info = LookupByPid(caps.pid);
-            if (!info) { *aOut = RED4ext::CString(caps.productName); return; }
-            *aOut = RED4ext::CString(std::string(info->name).c_str());
+            *aOut = RED4ext::CString(caps.productName);
         }
 
         void ReadConfig(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, RED4ext::CString* aOut, int64_t)
@@ -176,12 +180,23 @@ namespace gwheel::rtti
             if (aOut) *aOut = true;
         }
 
-        // -------- Input bindings --------------------------------------------
+        void SetResponseCurve(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        {
+            std::string s = ReadString(aFrame); aFrame->code++;
+            config::SetResponseCurve(s);
+            if (aOut) *aOut = true;
+        }
+
+        void SetMusicProcessName(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
+        {
+            std::string s = ReadString(aFrame); aFrame->code++;
+            config::SetMusicProcessName(s);
+            if (aOut) *aOut = true;
+        }
 
         void SetInputBinding(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
         {
-            int32_t inputId = -1;
-            int32_t action = 0;
+            int32_t inputId = 0; int32_t action = 0;
             RED4ext::GetParameter(aFrame, &inputId);
             RED4ext::GetParameter(aFrame, &action);
             aFrame->code++;
@@ -189,20 +204,16 @@ namespace gwheel::rtti
             if (aOut) *aOut = true;
         }
 
-        // -------- Player-vehicle mount tracking -----------------------------
-        //
-        // Called from redscript VehicleComponent mount/unmount wrappers so
-        // the hook knows which vehicle is "the one the player is driving"
-        // and doesn't write inputs into all the other vehicles the
-        // UpdateVehicleCameraInput detour fires on each tick.
-
         void SetPlayerVehicle(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
         {
-            RED4ext::Handle<RED4ext::ISerializable> handle;
+            RED4ext::Handle<RED4ext::IScriptable> handle;
             RED4ext::GetParameter(aFrame, &handle);
             aFrame->code++;
-            void* ptr = static_cast<void*>(handle.instance);
-            vehicle_hook::SetPlayerVehicle(ptr);
+            if (handle)
+            {
+                vehicle_hook::SetPlayerVehicle(handle.instance);
+                sources::SetInVehicle(true);
+            }
             if (aOut) *aOut = true;
         }
 
@@ -210,132 +221,87 @@ namespace gwheel::rtti
         {
             aFrame->code++;
             vehicle_hook::SetPlayerVehicle(nullptr);
+            sources::SetInVehicle(false);
             if (aOut) *aOut = true;
         }
 
-        // Vehicle telemetry pushed from redscript Blackboard listeners.
-        // See gwheel_vehicle_signals.reds.
         void SetEngineRpmNormalized(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
         {
-            float v = 0.f;
-            RED4ext::GetParameter(aFrame, &v);
-            aFrame->code++;
-            sources::SetEngineRpmNormalized(v);
+            float v = 0.f; RED4ext::GetParameter(aFrame, &v); aFrame->code++;
+            wheel::PlayLeds(v);
             if (aOut) *aOut = true;
         }
 
         void SetRadioActive(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
         {
-            bool v = false;
-            RED4ext::GetParameter(aFrame, &v);
-            aFrame->code++;
-            sources::SetRadioActive(v);
+            bool v = false; RED4ext::GetParameter(aFrame, &v); aFrame->code++;
+            (void)v;
             if (aOut) *aOut = true;
         }
 
-        // -------- Collision / bump feedback natives -------------------------
-        //
-        // Called from redscript @wrapMethod handlers on VehicleObject
-        // collision events (see gwheel_reds/gwheel_events.reds). Each
-        // native receives the vehicle handle + a signed lateral kick
-        // in [-1..+1] (negative = left-side hit, positive = right-side).
-        // The vehicle handle lets us filter out events from NPC cars /
-        // traffic — only the player's vehicle feeds the wheel.
-
         void OnVehicleBump(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
         {
-            RED4ext::Handle<RED4ext::ISerializable> handle;
+            RED4ext::Handle<RED4ext::IScriptable> handle;
             float kick = 0.f;
             RED4ext::GetParameter(aFrame, &handle);
             RED4ext::GetParameter(aFrame, &kick);
             aFrame->code++;
-            void* ptr = static_cast<void*>(handle.instance);
-            const bool isPlayer = vehicle_hook::IsPlayerVehicle(ptr);
-            if (log::DebugEnabled())
-                log::DebugF("[gwheel:evt] bump: kick=%+.3f vehicle=%p isPlayer=%d",
-                            kick, ptr, isPlayer ? 1 : 0);
-            if (isPlayer)
-                wheel::TriggerJolt(kick, 120); // short scrape
+            wheel::TriggerJolt(kick, 150);
             if (aOut) *aOut = true;
         }
 
         void OnVehicleHit(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
         {
-            RED4ext::Handle<RED4ext::ISerializable> handle;
+            RED4ext::Handle<RED4ext::IScriptable> handle;
             float kick = 0.f;
             RED4ext::GetParameter(aFrame, &handle);
             RED4ext::GetParameter(aFrame, &kick);
             aFrame->code++;
-            void* ptr = static_cast<void*>(handle.instance);
-            const bool isPlayer = vehicle_hook::IsPlayerVehicle(ptr);
-            if (log::DebugEnabled())
-                log::DebugF("[gwheel:evt] hit: kick=%+.3f vehicle=%p isPlayer=%d",
-                            kick, ptr, isPlayer ? 1 : 0);
-            if (isPlayer)
-                wheel::TriggerJolt(kick, 280); // heavier impact
+            wheel::TriggerJolt(kick, 250);
             if (aOut) *aOut = true;
         }
 
-        // Map a material CName hash to a baseline road-surface SINE
-        // magnitude (0..1). Hashes captured from 2026-04-24 log.
-        //
-        // All-zero for now. A non-zero baseline plays a constant 5.5 Hz
-        // SINE regardless of physics activity, which feels like the wheel
-        // is oscillating nonstop — confirmed by user on 2026-04-24 after
-        // first pass with metal=0.12 / unknown=0.10. Re-introduce values
-        // only when we've (a) captured dirt / gravel CNames to tune
-        // against and (b) got reliable per-tick material reads (no more
-        // alternating hits on the car body).
-        float SurfaceBaselineForMaterial(uint64_t /*hash*/)
-        {
-            return 0.f;
-        }
-
-        // Per-wheel material report from the redscript raycast poller
-        // (see gwheel_reds/gwheel_surface.reds). wheelIdx is 0..3
-        // (FL/FR/RL/RR by convention), material is the CName of the
-        // physics material under that wheel's raycast hit. Called
-        // on transitions only.
         void OnWheelMaterial(RED4ext::IScriptable*, RED4ext::CStackFrame* aFrame, bool* aOut, int64_t)
         {
-            int32_t idx = -1;
-            RED4ext::CName mat;
-            RED4ext::GetParameter(aFrame, &idx);
+            int32_t wheelIdx = 0; RED4ext::CName mat;
+            RED4ext::GetParameter(aFrame, &wheelIdx);
             RED4ext::GetParameter(aFrame, &mat);
             aFrame->code++;
-            const char* name = RED4ext::CNamePool::Get(mat);
-            const float baseline = SurfaceBaselineForMaterial(mat.hash);
-            wheel::SetSurfaceBaselineMag(baseline);
-            log::InfoF("[gwheel:surface] wheel[%d] material: %s (hash=0x%016llX) baseline=%.2f",
-                       idx,
-                       name ? name : "(null)",
-                       static_cast<unsigned long long>(mat.hash),
-                       baseline);
+            (void)wheelIdx; (void)mat;
             if (aOut) *aOut = true;
         }
-
-        // -------- Registration ----------------------------------------------
-
-        using FuncFlags = RED4ext::CBaseFunction::Flags;
-
-        void RegisterTypes() {}
 
         void RegisterGlobal(RED4ext::CRTTISystem* rtti,
                             const char* name,
-                            RED4ext::ScriptingFunction_t<void*> fn,
+                            RED4ext::ScriptingFunction_t<void*> func,
                             const char* returnType,
                             std::initializer_list<std::pair<const char*, const char*>> params)
         {
-            auto func = RED4ext::CGlobalFunction::Create(name, name, fn);
-            func->flags = FuncFlags{ .isNative = true, .isStatic = true };
-            if (returnType && *returnType) func->SetReturnType(returnType);
-            for (const auto& p : params) func->AddParam(p.first, p.second);
-            rtti->RegisterFunction(func);
+            auto f = RED4ext::CGlobalFunction::Create(name, name, func);
+            if (!f)
+            {
+                log::ErrorF("[gwheel] Failed to create native function: %s", name);
+                return;
+            }
+            if (returnType && std::strlen(returnType) > 0)
+            {
+                f->SetReturnType(RED4ext::CName(returnType));
+            }
+            for (const auto& [type, pName] : params)
+            {
+                f->AddParam(RED4ext::CName(type), pName);
+            }
+            rtti->RegisterFunction(f);
+        }
+
+        void RegisterTypes()
+        {
         }
 
         void PostRegisterTypes()
         {
             auto rtti = RED4ext::CRTTISystem::Get();
+            if (!rtti) return;
 
             RegisterGlobal(rtti, "GWheel_GetVersion",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&GetVersion),
@@ -349,6 +315,7 @@ namespace gwheel::rtti
             RegisterGlobal(rtti, "GWheel_HasFFB",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&HasFFB),
                            "Bool", {});
+
             RegisterGlobal(rtti, "GWheel_DetectedHasRightCluster",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&DetectedHasRightCluster),
                            "Bool", {});
@@ -358,9 +325,16 @@ namespace gwheel::rtti
             RegisterGlobal(rtti, "GWheel_DetectedHasRevLeds",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&DetectedHasRevLeds),
                            "Bool", {});
+            RegisterGlobal(rtti, "GWheel_DetectedHasYokeHardware",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&DetectedHasYokeHardware),
+                           "Bool", {});
+            RegisterGlobal(rtti, "GWheel_DetectedHasRudderPedals",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&DetectedHasRudderPedals),
+                           "Bool", {});
             RegisterGlobal(rtti, "GWheel_DetectedModelName",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&DetectedModelName),
                            "String", {});
+
             RegisterGlobal(rtti, "GWheel_ReadConfig",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&ReadConfig),
                            "String", {});
@@ -371,6 +345,9 @@ namespace gwheel::rtti
             RegisterGlobal(rtti, "GWheel_SetClutchAsBrake",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetClutchAsBrake>),
                            "Bool", {{ "Bool", "v" }});
+            RegisterGlobal(rtti, "GWheel_SetResponseCurve",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetResponseCurve),
+                           "Bool", {{ "String", "v" }});
 
             RegisterGlobal(rtti, "GWheel_SetFfbEnabled",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetFfbEnabled>),
@@ -381,6 +358,23 @@ namespace gwheel::rtti
             RegisterGlobal(rtti, "GWheel_SetFfbTorquePct",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetFfbTorquePct>),
                            "Bool", {{ "Int32", "pct" }});
+
+            // Flight Yoke & Rudder Pedals
+            RegisterGlobal(rtti, "GWheel_SetPitchSpringStrength",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetFloat<&config::SetPitchSpringStrength>),
+                           "Bool", {{ "Float", "v" }});
+            RegisterGlobal(rtti, "GWheel_SetPitchDamperStrength",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetFloat<&config::SetPitchDamperStrength>),
+                           "Bool", {{ "Float", "v" }});
+            RegisterGlobal(rtti, "GWheel_SetPitchAction",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInt<&config::SetPitchAction>),
+                           "Bool", {{ "Int32", "v" }});
+            RegisterGlobal(rtti, "GWheel_SetLeftToeBrakeInvert",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetLeftToeBrakeInvert>),
+                           "Bool", {{ "Bool", "v" }});
+            RegisterGlobal(rtti, "GWheel_SetRightToeBrakeInvert",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetRightToeBrakeInvert>),
+                           "Bool", {{ "Bool", "v" }});
 
             RegisterGlobal(rtti, "GWheel_SetHandshakePlayOnStart",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetHandshakePlayOnStart>),
@@ -402,6 +396,10 @@ namespace gwheel::rtti
             RegisterGlobal(rtti, "GWheel_SetLedVisualizerWhileMusic",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetBool<&config::SetLedVisualizerWhileMusic>),
                            "Bool", {{ "Bool", "v" }});
+
+            RegisterGlobal(rtti, "GWheel_SetMusicProcessName",
+                           reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetMusicProcessName),
+                           "Bool", {{ "String", "v" }});
 
             RegisterGlobal(rtti, "GWheel_SetInputBinding",
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&SetInputBinding),
@@ -432,18 +430,8 @@ namespace gwheel::rtti
                            reinterpret_cast<RED4ext::ScriptingFunction_t<void*>>(&OnWheelMaterial),
                            "Bool", {{ "Int32", "wheelIdx" }, { "CName", "material" }});
 
-
             log::Info("[gwheel] native functions registered for redscript");
-
-            // Resolve vehicle struct offsets dynamically from RTTI — this
-            // sidesteps the "offsets drifted between game patches" problem
-            // by asking the game itself where each field lives. See
-            // rtti_offsets.cpp for what gets resolved.
             rtti_offsets::Init();
-
-            // BISECT: RTTI dump disabled. Still registering natives above;
-            // just skipping the full class enumeration pass.
-            log::Info("[gwheel] RTTI dump DISABLED this build (bisect)");
         }
     }
 

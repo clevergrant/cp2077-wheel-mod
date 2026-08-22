@@ -34,8 +34,6 @@ namespace gwheel::config
 
         std::filesystem::path ResolvePath()
         {
-            // gwheel.dll lives at <CP2077>/red4ext/plugins/gwheel/gwheel.dll
-            // — config.json sits next to the DLL.
             HMODULE mod = nullptr;
             GetModuleHandleExW(
                 GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
@@ -48,8 +46,6 @@ namespace gwheel::config
             p.replace_filename(L"config.json");
             return p;
         }
-
-        // --- very small JSON helpers, sufficient for our flat schema ------------
 
         void EscapeJsonTo(std::string& dst, std::string_view s)
         {
@@ -96,6 +92,19 @@ namespace gwheel::config
             out << "    \"activeTorqueStrengthPct\": " << c.ffb.activeTorqueStrengthPct                << "\n";
             out << "  },\n";
 
+            out << "  \"yoke\": {\n";
+            out << "    \"enabled\": "             << (c.yoke.enabled ? "true" : "false") << ",\n";
+            out << "    \"pitchSpringStrength\": " << c.yoke.pitchSpringStrength          << ",\n";
+            out << "    \"pitchDamperStrength\": " << c.yoke.pitchDamperStrength          << ",\n";
+            out << "    \"pitchAction\": "         << c.yoke.pitchAction                  << "\n";
+            out << "  },\n";
+
+            out << "  \"rudder\": {\n";
+            out << "    \"enabled\": "             << (c.rudder.enabled ? "true" : "false")             << ",\n";
+            out << "    \"leftToeBrakeInvert\": "  << (c.rudder.leftToeBrakeInvert ? "true" : "false")  << ",\n";
+            out << "    \"rightToeBrakeInvert\": " << (c.rudder.rightToeBrakeInvert ? "true" : "false") << "\n";
+            out << "  },\n";
+
             out << "  \"handshake\": {\n";
             out << "    \"playOnStart\": " << (c.handshake.playOnStart ? "true" : "false") << "\n";
             out << "  },\n";
@@ -138,9 +147,6 @@ namespace gwheel::config
             return out.str();
         }
 
-        // Parse the flat "bindings" array — fixed-length, one int per
-        // PhysicalInput. Missing array or missing elements default to 0
-        // (Action::None) so older config.json files upgrade cleanly.
         void ParseBindings(const std::string& text, Config& c)
         {
             c.bindings.fill(0);
@@ -155,7 +161,6 @@ namespace gwheel::config
             size_t slot = 0;
             while (i < rbrack && slot < c.bindings.size())
             {
-                // Skip whitespace and commas.
                 while (i < rbrack && (text[i] == ' ' || text[i] == '\t' || text[i] == ',' ||
                                       text[i] == '\n' || text[i] == '\r'))
                     ++i;
@@ -163,15 +168,13 @@ namespace gwheel::config
 
                 char* endp = nullptr;
                 long val = std::strtol(text.c_str() + i, &endp, 10);
-                if (endp == text.c_str() + i) break; // no digit found
+                if (endp == text.c_str() + i) break;
 
                 c.bindings[slot++] = static_cast<int32_t>(val);
                 i = static_cast<size_t>(endp - text.c_str());
             }
         }
 
-        // Case-sensitive "find `"key"` after the last occurrence of `section`".
-        // Returns the offset of the value's first char, or std::string::npos.
         size_t FindValueOffset(const std::string& text, std::string_view section, std::string_view key)
         {
             size_t sec = section.empty() ? 0 : text.find(std::string("\"") + std::string(section) + "\"");
@@ -241,10 +244,15 @@ namespace gwheel::config
             ExtractInt   (text, "ffb",      "yawFeedbackPct",         c.ffb.yawFeedbackPct);
             ExtractInt   (text, "ffb",      "activeTorqueStrengthPct", c.ffb.activeTorqueStrengthPct);
 
-            // "handshake" is the current key. Older config.json files from
-            // pre-rename installs used "hello" for the same field; read
-            // that first so existing settings migrate, then overwrite with
-            // the new key if present.
+            ExtractBool  (text, "yoke",     "enabled",                c.yoke.enabled);
+            ExtractFloat (text, "yoke",     "pitchSpringStrength",    c.yoke.pitchSpringStrength);
+            ExtractFloat (text, "yoke",     "pitchDamperStrength",    c.yoke.pitchDamperStrength);
+            ExtractInt   (text, "yoke",     "pitchAction",            c.yoke.pitchAction);
+
+            ExtractBool  (text, "rudder",   "enabled",                c.rudder.enabled);
+            ExtractBool  (text, "rudder",   "leftToeBrakeInvert",     c.rudder.leftToeBrakeInvert);
+            ExtractBool  (text, "rudder",   "rightToeBrakeInvert",    c.rudder.rightToeBrakeInvert);
+
             ExtractBool  (text, "hello",     "playOnStart",            c.handshake.playOnStart);
             ExtractBool  (text, "handshake", "playOnStart",            c.handshake.playOnStart);
 
@@ -288,7 +296,6 @@ namespace gwheel::config
 
         void ApplyDerived(const Config& c)
         {
-            // Anything that must take effect immediately when config changes.
             log::SetDebugEnabled(c.ffb.debugLogging);
             input_bindings::ReplaceAll(c.bindings);
             wheel::SetGlobalStrength(std::clamp(c.ffb.torquePct, 0, 100) / 100.f);
@@ -349,8 +356,7 @@ namespace gwheel::config
             }
             catch (...)
             {
-                log::Warn("[gwheel] config parse failed — using defaults. "
-                          "If config.json has been hand-edited, check for invalid JSON or out-of-range values.");
+                log::Warn("[gwheel] config parse failed — using defaults.");
                 c = {};
             }
         }
@@ -384,6 +390,13 @@ namespace gwheel::config
     void SetStationaryThresholdMps(float v) { Mutate([&](Config& c){ c.ffb.stationaryThresholdMps = std::clamp(v, 0.f, 10.f); }); }
     void SetYawFeedbackPct(int32_t v)       { Mutate([&](Config& c){ c.ffb.yawFeedbackPct = std::clamp(v, 0, 100); }); }
     void SetActiveTorqueStrengthPct(int32_t v) { Mutate([&](Config& c){ c.ffb.activeTorqueStrengthPct = std::clamp(v, 0, 100); }); }
+
+    void SetPitchSpringStrength(float v)    { Mutate([&](Config& c){ c.yoke.pitchSpringStrength = std::clamp(v, 0.f, 1.f); }); }
+    void SetPitchDamperStrength(float v)    { Mutate([&](Config& c){ c.yoke.pitchDamperStrength = std::clamp(v, 0.f, 1.f); }); }
+    void SetPitchAction(int32_t v)          { Mutate([&](Config& c){ c.yoke.pitchAction = v; }); }
+
+    void SetLeftToeBrakeInvert(bool v)      { Mutate([&](Config& c){ c.rudder.leftToeBrakeInvert = v; }); }
+    void SetRightToeBrakeInvert(bool v)     { Mutate([&](Config& c){ c.rudder.rightToeBrakeInvert = v; }); }
 
     void SetHandshakePlayOnStart(bool v)    { Mutate([&](Config& c){ c.handshake.playOnStart = v; }); }
 

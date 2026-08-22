@@ -488,25 +488,84 @@ namespace gwheel::vehicle_hook
                 // the per-profile operating range, so wheel position passes
                 // through unmodified.
                 const float wheelSteer    = Clamp(frame.axes.steer,    -1.0f, 1.0f);
-                const float wheelThrottle = Clamp(frame.axes.throttle,  0.0f, 1.0f);
-                const float wheelBrake    = Clamp(frame.axes.brake,     0.0f, 1.0f);
+                const float wheelThrottle = (frame.axes.throttle > 0.01f) ? Clamp(frame.axes.throttle,  0.0f, 1.0f) : 0.0f;
+                const float wheelBrake    = (frame.axes.brake > 0.01f) ? Clamp(frame.axes.brake,     0.0f, 1.0f) : 0.0f;
 
                 // Merge with whatever the vanilla input pipeline (keyboard /
                 // gamepad) already wrote into the struct. g_original(self)
                 // above has already processed WASD / analog stick input into
                 // these fields; we take the max-magnitude so wheel and
-                // keyboard coexist — whichever source asks for more steer /
-                // throttle / brake wins, neither clobbers the other.
+                const float forwardSpeed = ReadVehicleSpeed(self);
+
+                // Smart Braking / Hold-to-Stop:
+                // When moving forward (forwardSpeed > 0.3 m/s), left pedal acts as active wheel brake.
+                // Once the car stops (speed <= 0.3 m/s), holding the pedal holds the car stationary without auto-reversing.
+                // Lifting and re-pressing when stopped engages reverse gear.
+                static bool s_reverseEngaged = false;
+                static bool s_wasBrakingAtZero = false;
+
+                if (wheelBrake < 0.05f)
+                {
+                    if (s_wasBrakingAtZero)
+                    {
+                        s_reverseEngaged = true;
+                        s_wasBrakingAtZero = false;
+                    }
+                    else if (forwardSpeed > 0.5f)
+                    {
+                        s_reverseEngaged = false;
+                    }
+                }
+
+                if (wheelThrottle > 0.05f)
+                {
+                    s_reverseEngaged = false;
+                    s_wasBrakingAtZero = false;
+                }
+
+                float effectiveBrake = wheelBrake;
+                if (!s_reverseEngaged)
+                {
+                    if (forwardSpeed > 0.3f)
+                    {
+                        s_wasBrakingAtZero = false;
+                        effectiveBrake = wheelBrake;
+                    }
+                    else if (wheelBrake > 0.05f)
+                    {
+                        s_wasBrakingAtZero = true;
+                        effectiveBrake = 0.0f;
+                    }
+                }
+                else
+                {
+                    effectiveBrake = wheelBrake;
+                }
+
                 float* pSteer    = FloatFieldAt(self, off::kInputSteer);
                 float* pThrottle = &veh->acceleration;
                 float* pBrake    = &veh->deceleration;
 
-                if (std::fabs(wheelSteer) > std::fabs(*pSteer))
-                    *pSteer = wheelSteer;
-                if (wheelThrottle > *pThrottle)
+                // When steering yoke / pedals are active, direct-drive the vehicle controls.
+                // If keyboard keys (W, S, A, D) are actively held, allow keyboard override.
+                const bool kbdActive = (GetAsyncKeyState('W') & 0x8000) || (GetAsyncKeyState('S') & 0x8000) ||
+                                       (GetAsyncKeyState('A') & 0x8000) || (GetAsyncKeyState('D') & 0x8000);
+
+                if (!kbdActive)
+                {
+                    *pSteer    = wheelSteer;
                     *pThrottle = wheelThrottle;
-                if (wheelBrake > *pBrake)
-                    *pBrake = wheelBrake;
+                    *pBrake    = effectiveBrake;
+                }
+                else
+                {
+                    if (std::fabs(wheelSteer) > std::fabs(*pSteer))
+                        *pSteer = wheelSteer;
+                    if (wheelThrottle > *pThrottle)
+                        *pThrottle = wheelThrottle;
+                    if (effectiveBrake > *pBrake)
+                        *pBrake = effectiveBrake;
+                }
 
                 const float steer    = *pSteer;
                 const float throttle = *pThrottle;
