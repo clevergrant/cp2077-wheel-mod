@@ -3,42 +3,6 @@
 // Single GWheelSettings class. Categories (`ModSettings.category` +
 // `ModSettings.category.order`) provide visual grouping on the scrolling
 // settings panel.
-//
-// Capability auto-detection (how the section-hide actually works):
-//
-//   1. Three hidden Bool fields (hasFfbHardware, hasRevLeds, hasRightCluster)
-//      carry the runtime-property `ModSettings.hidden = "true"`. With our
-//      patched mod_settings build they are excluded from the UI list but
-//      still registered as variables.
-//
-//   2. Other settings reference these fields via `ModSettings.dependency`.
-//      mod_settings hides the dependent setting whenever the dependency
-//      target's stored value is not "true".
-//
-//   3. mod_settings reads its stored values from
-//      `red4ext/plugins/mod_settings/user.ini` once at process start. So to
-//      drive the three capability flags from real hardware state we have to
-//      write that file BEFORE mod_settings reads it. That happens in
-//      gwheel.dll's RED4ext OnLoad — see gwheel/src/mod_settings_seed.cpp.
-//      Plugin OnLoads complete before script-data processing, so the
-//      ordering is safe regardless of plugin load order.
-//
-//   4. Important consequence: the UI reflects the wheel state captured at
-//      the moment of process start. Plug or unplug the wheel = restart the
-//      game once for the section list to catch up.
-//
-// `ModSettings.hidden` requires our patched build of mod_settings (a
-// small patch on top of jackhumbert/mod_settings v0.2.21, see
-// vendor/mod_settings/). Plain upstream mod_settings ignores the hidden
-// runtime property and the three capability flags would render as visible
-// Bool toggles. deploy.ps1 ships our patched DLL alongside gwheel.dll.
-//
-// mod_settings dependency evaluation reads from its OWN internal
-// RuntimeVariable<T> storage, NOT from the instance passed to
-// RegisterListenerToClass. Setting capability flags on the listener
-// instance from script does nothing for visibility — the only way to
-// drive them is via user.ini (above). Verified against mod_settings
-// source 2026-04-25.
 
 public class GWheelSettings extends IScriptable {
 
@@ -47,7 +11,7 @@ public class GWheelSettings extends IScriptable {
   // ModSettings.hidden = "true" makes these invisible in the settings UI.
   // Requires our patched mod_settings build (vendor/mod_settings/). Other
   // fields reference these as `ModSettings.dependency` targets to hide
-  // entire sections on wheels without the relevant hardware.
+  // entire sections on wheels/controllers without the relevant hardware.
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.hidden", "true")
@@ -61,16 +25,24 @@ public class GWheelSettings extends IScriptable {
   @runtimeProperty("ModSettings.hidden", "true")
   let hasRightCluster: Bool = true;
 
-  // ---- Wheel input --------------------------------------------------------
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.hidden", "true")
+  let hasYokeHardware: Bool = true;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Wheel input")
+  @runtimeProperty("ModSettings.hidden", "true")
+  let hasRudderPedals: Bool = true;
+
+  // ---- Wheel / Yoke input -------------------------------------------------
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Wheel & Yoke input")
   @runtimeProperty("ModSettings.category.order", "100")
-  @runtimeProperty("ModSettings.displayName", "Enable wheel input")
+  @runtimeProperty("ModSettings.displayName", "Enable input")
   let inputEnabled: Bool = true;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Wheel input")
+  @runtimeProperty("ModSettings.category", "Wheel & Yoke input")
   @runtimeProperty("ModSettings.category.order", "100")
   @runtimeProperty("ModSettings.displayName", "Treat clutch as brake")
   @runtimeProperty("ModSettings.description", "The clutch acts just like the brake pedal. Useful for stiff brake pedals, since there's no gear system in the game.")
@@ -129,6 +101,48 @@ public class GWheelSettings extends IScriptable {
   @runtimeProperty("ModSettings.dependency", "hasFfbHardware")
   let stationaryThresholdMps: Float = 0.5;
 
+  // ---- Flight Yoke Pitch (AY90 / AY210) -----------------------------------
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Flight Yoke (Pitch axis)")
+  @runtimeProperty("ModSettings.category.order", "250")
+  @runtimeProperty("ModSettings.displayName", "Yoke pitch centering stiffness")
+  @runtimeProperty("ModSettings.description", "Centering spring force applied to keep the push/pull pitch column stable while driving.")
+  @runtimeProperty("ModSettings.min", "0.0")
+  @runtimeProperty("ModSettings.max", "1.0")
+  @runtimeProperty("ModSettings.step", "0.05")
+  @runtimeProperty("ModSettings.dependency", "hasYokeHardware")
+  let pitchSpringStrength: Float = 0.8;
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Flight Yoke (Pitch axis)")
+  @runtimeProperty("ModSettings.category.order", "250")
+  @runtimeProperty("ModSettings.displayName", "Yoke pitch damping")
+  @runtimeProperty("ModSettings.description", "Viscous damping to prevent push/pull column oscillation.")
+  @runtimeProperty("ModSettings.min", "0.0")
+  @runtimeProperty("ModSettings.max", "1.0")
+  @runtimeProperty("ModSettings.step", "0.05")
+  @runtimeProperty("ModSettings.dependency", "hasYokeHardware")
+  let pitchDamperStrength: Float = 0.5;
+
+  // ---- Rudder Pedals & Toe Brakes -----------------------------------------
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Rudder Pedals & Toe Brakes")
+  @runtimeProperty("ModSettings.category.order", "260")
+  @runtimeProperty("ModSettings.displayName", "Invert left toe brake (Brake)")
+  @runtimeProperty("ModSettings.description", "Invert polarity of left toe brake pedal if it applies 100% brake at rest.")
+  @runtimeProperty("ModSettings.dependency", "hasRudderPedals")
+  let leftToeBrakeInvert: Bool = false;
+
+  @runtimeProperty("ModSettings.mod", "G-series Wheel")
+  @runtimeProperty("ModSettings.category", "Rudder Pedals & Toe Brakes")
+  @runtimeProperty("ModSettings.category.order", "260")
+  @runtimeProperty("ModSettings.displayName", "Invert right toe brake (Throttle)")
+  @runtimeProperty("ModSettings.description", "Invert polarity of right toe brake pedal if it applies 100% throttle at rest.")
+  @runtimeProperty("ModSettings.dependency", "hasRudderPedals")
+  let rightToeBrakeInvert: Bool = false;
+
   // ---- Rev-strip LEDs -----------------------------------------------------
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
@@ -141,30 +155,18 @@ public class GWheelSettings extends IScriptable {
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.category", "Rev-strip LEDs")
   @runtimeProperty("ModSettings.category.order", "300")
-  @runtimeProperty("ModSettings.displayName", "Rev strip as visualizer while music is playing")
+  @runtimeProperty("ModSettings.displayName", "Audio visualizer during music")
+  @runtimeProperty("ModSettings.description", "Reflects game audio envelope on the rev-strip when music or radio plays.")
   @runtimeProperty("ModSettings.dependency", "hasRevLeds")
   let ledVisualizerWhileMusic: Bool = true;
 
-  // ---- Button bindings (15 controls present on every G-series wheel) -----
-  //
-  // Every binding here is user-controlled, with no hidden overrides. The
-  // D-pad + A defaults are Menu-nav (Up/Down/Left/Right arrow keys and
-  // Enter) so the wheel navigates pause/map/inventory menus like a
-  // controller out of the box. If you'd rather those wheel controls stay
-  // inert while driving, set them to None — CP2077's arrow keys are
-  // secondary vehicle controls (Up/Down = accelerate/decelerate, Left/Right
-  // = steer), so binding the D-pad to Menu-nav and then pressing the D-pad
-  // while driving will nudge the car.
-  //
-  // IMPORTANT: clear the D-pad and A/B/X/Y keyboard bindings in G HUB's
-  // Cyberpunk profile. Otherwise G HUB + plugin both fire keyboard
-  // events and you'll get doubled keypresses.
+  // ---- Button bindings ----------------------------------------------------
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.category", "Button bindings")
   @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "Left paddle shifter")
-  let bindPaddleLeft: GWheelAction = GWheelAction.ShootPrimary;
+  let bindPaddleLeft: GWheelAction = GWheelAction.ShootSecondary;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.category", "Button bindings")
@@ -248,52 +250,51 @@ public class GWheelSettings extends IScriptable {
   @runtimeProperty("ModSettings.category", "Button bindings")
   @runtimeProperty("ModSettings.category.order", "400")
   @runtimeProperty("ModSettings.displayName", "Xbox / Guide button")
-  let bindXbox: GWheelAction = GWheelAction.ExitVehicle;
+  let bindXbox: GWheelAction = GWheelAction.None;
 
-  // ---- Lower-cluster bindings (G29 / G923 / G PRO; absent on G920) -------
+  // ---- Right-cluster controls ---------------------------------------------
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Lower-cluster bindings")
+  @runtimeProperty("ModSettings.category", "Right-cluster controls")
   @runtimeProperty("ModSettings.category.order", "500")
-  @runtimeProperty("ModSettings.displayName", "Plus (+) button")
+  @runtimeProperty("ModSettings.displayName", "Plus button")
   @runtimeProperty("ModSettings.dependency", "hasRightCluster")
-  let bindPlus: GWheelAction = GWheelAction.CameraCycleForward;
+  let bindPlus: GWheelAction = GWheelAction.NextWeapon;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Lower-cluster bindings")
+  @runtimeProperty("ModSettings.category", "Right-cluster controls")
   @runtimeProperty("ModSettings.category.order", "500")
-  @runtimeProperty("ModSettings.displayName", "Minus (-) button")
+  @runtimeProperty("ModSettings.displayName", "Minus button")
   @runtimeProperty("ModSettings.dependency", "hasRightCluster")
-  let bindMinus: GWheelAction = GWheelAction.Headlights;
+  let bindMinus: GWheelAction = GWheelAction.PrevWeapon;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Lower-cluster bindings")
+  @runtimeProperty("ModSettings.category", "Right-cluster controls")
   @runtimeProperty("ModSettings.category.order", "500")
-  @runtimeProperty("ModSettings.displayName", "Scroll click (Return)")
+  @runtimeProperty("ModSettings.displayName", "Scroll wheel click")
   @runtimeProperty("ModSettings.dependency", "hasRightCluster")
-  let bindScrollClick: GWheelAction = GWheelAction.HolsterWeapon;
+  let bindScrollClick: GWheelAction = GWheelAction.SwitchWeapons;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Lower-cluster bindings")
+  @runtimeProperty("ModSettings.category", "Right-cluster controls")
   @runtimeProperty("ModSettings.category.order", "500")
   @runtimeProperty("ModSettings.displayName", "Scroll clockwise")
   @runtimeProperty("ModSettings.dependency", "hasRightCluster")
-  let bindScrollCW: GWheelAction = GWheelAction.NextWeapon;
+  let bindScrollCW: GWheelAction = GWheelAction.RadioNext;
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
-  @runtimeProperty("ModSettings.category", "Lower-cluster bindings")
+  @runtimeProperty("ModSettings.category", "Right-cluster controls")
   @runtimeProperty("ModSettings.category.order", "500")
   @runtimeProperty("ModSettings.displayName", "Scroll counter-clockwise")
   @runtimeProperty("ModSettings.dependency", "hasRightCluster")
-  let bindScrollCCW: GWheelAction = GWheelAction.PrevWeapon;
+  let bindScrollCCW: GWheelAction = GWheelAction.None;
 
   // ---- Startup ------------------------------------------------------------
 
   @runtimeProperty("ModSettings.mod", "G-series Wheel")
   @runtimeProperty("ModSettings.category", "Startup")
   @runtimeProperty("ModSettings.category.order", "600")
-  @runtimeProperty("ModSettings.displayName", "Pon pon shi greeting")
-  @runtimeProperty("ModSettings.description", "Make the wheel dance when the game starts.")
+  @runtimeProperty("ModSettings.displayName", "Startup greeting")
   let handshakePlayOnStart: Bool = false;
 
   // ---- Debug --------------------------------------------------------------
@@ -302,10 +303,9 @@ public class GWheelSettings extends IScriptable {
   @runtimeProperty("ModSettings.category", "Debug")
   @runtimeProperty("ModSettings.category.order", "700")
   @runtimeProperty("ModSettings.displayName", "Debug logging")
-  @runtimeProperty("ModSettings.description", "Logs to red4ext/logs/gwheel-*.log.")
   let ffbDebugLogging: Bool = false;
 
-  // ---- Listener callbacks (invoked by Mod Settings, NOT cb funcs) --------
+  // ---- Listener callbacks -------------------------------------------------
 
   public func OnModSettingsChange() -> Void {
     this.Push();
@@ -323,15 +323,17 @@ public class GWheelSettings extends IScriptable {
     GWheel_SetYawFeedbackPct(this.yawFeedbackPct);
     GWheel_SetActiveTorqueStrengthPct(this.activeTorqueStrengthPct);
 
+    // Flight Yoke & Rudder Pedals
+    GWheel_SetPitchSpringStrength(this.pitchSpringStrength);
+    GWheel_SetPitchDamperStrength(this.pitchDamperStrength);
+    GWheel_SetLeftToeBrakeInvert(this.leftToeBrakeInvert);
+    GWheel_SetRightToeBrakeInvert(this.rightToeBrakeInvert);
+
     GWheel_SetHandshakePlayOnStart(this.handshakePlayOnStart);
 
     GWheel_SetLedEnabled(this.ledEnabled);
     GWheel_SetLedVisualizerWhileMusic(this.ledVisualizerWhileMusic);
 
-    // Input IDs match the PhysicalInput enum in
-    // gwheel/src/input_bindings.h. D-pad + A/B/X/Y (ids 2-9) are
-    // in-vehicle bindings here; the plugin overrides them with
-    // gamepad-nav whenever a menu is open.
     GWheel_SetInputBinding(0,  EnumInt(this.bindPaddleLeft));
     GWheel_SetInputBinding(1,  EnumInt(this.bindPaddleRight));
     GWheel_SetInputBinding(2,  EnumInt(this.bindDpadUp));
@@ -355,59 +357,31 @@ public class GWheelSettings extends IScriptable {
   }
 }
 
-// Actions the plugin knows how to dispatch. Indices must match the Action
-// enum in gwheel/src/input_bindings.h — same values, same order.
-// Grouped by category (driving / camera / combat / weapons / radio /
-// gameplay / menus / menu-nav) so Mod Settings' scroll-list shows similar
-// actions adjacent. MUST stay in lockstep with the C++ `Action` enum in
-// gwheel/src/input_bindings.h — same names, same integer values, same
-// order. Mod Settings persists each binding by integer value, so any
-// reorder shifts users' saved bindings (one-time forced re-bind).
-//
-// `RearViewCamera` is the redscript-side spelling of CameraCycleBackward;
-// the dropdown label inherits the redscript identifier so we use the
-// gameplay-meaningful name here even though the C++ side keeps the older
-// "Backward" naming for historical reasons.
-
 enum GWheelAction {
   None = 0,
-
-  // Driving
   Horn = 1,
   Headlights = 2,
   Handbrake = 3,
   Autodrive = 4,
   ExitVehicle = 5,
   CallVehicle = 6,
-
-  // Camera
   CameraCycleForward = 7,
   RearViewCamera = 8,
   CameraReset = 9,
-
-  // Combat
   ShootPrimary = 10,
   ShootSecondary = 11,
   ShootTertiary = 12,
-
-  // Weapons
   NextWeapon = 13,
   PrevWeapon = 14,
   WeaponSlot1 = 15,
   WeaponSlot2 = 16,
   SwitchWeapons = 17,
   HolsterWeapon = 18,
-
-  // Radio
   RadioMenu = 19,
   RadioNext = 20,
-
-  // Gameplay misc
   UseConsumable = 21,
   IconicCyberware = 22,
   QuickSave = 23,
-
-  // Menus
   OpenMap = 24,
   OpenJournal = 25,
   OpenInventory = 26,
@@ -415,8 +389,6 @@ enum GWheelAction {
   OpenPerks = 28,
   OpenCrafting = 29,
   Pause = 30,
-
-  // Menu navigation
   MenuConfirm = 31,
   MenuCancel = 32,
   MenuUp = 33,
@@ -424,18 +396,6 @@ enum GWheelAction {
   MenuLeft = 35,
   MenuRight = 36,
 }
-
-// Attach our settings instance to the player puppet so it lives for the
-// session and register it as a listener with Mod Settings. The listener
-// receives OnModSettingsChange callbacks when the user clicks Apply in the
-// settings menu — we use that to push the new values into the C++ plugin
-// via the GWheel_Set* natives.
-//
-// The hidden capability flags (hasFfbHardware / hasRevLeds /
-// hasRightCluster) are not seeded here. Mod Settings ignores writes to the
-// listener instance for dependency / visibility purposes. Those flags are
-// driven directly into mod_settings/user.ini from the C++ side at plugin
-// load (see gwheel/src/mod_settings_seed.cpp).
 
 @addField(PlayerPuppet)
 public let m_gwheelSettings: ref<GWheelSettings>;

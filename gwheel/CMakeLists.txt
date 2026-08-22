@@ -3,6 +3,9 @@ set(GWHEEL_SOURCES
   src/plugin.cpp
   src/device_table.cpp
   src/wheel.cpp
+  src/dinput_manager.cpp
+  src/dinput_backend.cpp
+  src/moza_backend.cpp
   src/sources.cpp
   src/vehicle_hook.cpp
   src/input_bindings.cpp
@@ -22,6 +25,10 @@ set(GWHEEL_HEADERS
   src/logging.h
   src/device_table.h
   src/wheel.h
+  src/ffb_backend.h
+  src/dinput_manager.h
+  src/dinput_backend.h
+  src/moza_backend.h
   src/sources.h
   src/vehicle_hook.h
   src/vehicle_physics_ext.h
@@ -42,15 +49,9 @@ add_library(gwheel SHARED
   ${GWHEEL_HEADERS}
 )
 
-# Logitech Steering Wheel SDK (vendored under vendor/LogitechSDK_unpacked/).
 set(LOGI_SDK_ROOT "${CMAKE_SOURCE_DIR}/vendor/LogitechSDK_unpacked")
 set(LOGI_SDK_INCLUDE_DIR "${LOGI_SDK_ROOT}/Include")
 set(LOGI_SDK_LIB "${LOGI_SDK_ROOT}/Lib/x64/LogitechSteeringWheelLib.lib")
-if(NOT EXISTS "${LOGI_SDK_LIB}")
-  message(FATAL_ERROR
-    "Logitech SDK import lib not found at ${LOGI_SDK_LIB}. "
-    "Ensure vendor/LogitechSDK_unpacked/ is present.")
-endif()
 
 target_include_directories(gwheel
   PRIVATE
@@ -62,17 +63,16 @@ target_include_directories(gwheel
 target_link_libraries(gwheel
   PRIVATE
     RED4ext::SDK
-    "${LOGI_SDK_LIB}"
     dinput8
     dxguid
-    # WASAPI loopback capture for the LED music visualizer:
-    #   ole32     — CoInitializeEx / CoCreateInstance
-    #   uuid      — GUID constants for MMDevice / IAudioClient / KSDATAFORMAT_*
-    #   mmdevapi  — ActivateAudioInterfaceAsync (per-process loopback API)
     ole32
     uuid
     mmdevapi
 )
+
+if(EXISTS "${LOGI_SDK_LIB}")
+  target_link_libraries(gwheel PRIVATE "${LOGI_SDK_LIB}")
+endif()
 
 set_target_properties(gwheel PROPERTIES
   OUTPUT_NAME "gwheel"

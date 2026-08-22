@@ -1,10 +1,5 @@
 # Build the project: patched mod_settings.dll (vendor/mod_settings/) followed by
-# gwheel.dll itself.
-#
-# Requires:
-#   - Visual Studio 2022 with the "Desktop development with C++" workload
-#   - CMake 3.21+ on PATH, OR the "C++ CMake tools for Windows" VS workload
-#     (which bundles a cmake.exe under the VS install dir)
+# gwheel.dll and diagnostic tools.
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File build.ps1
@@ -36,77 +31,85 @@ function Resolve-CMake {
 $cmake = Resolve-CMake
 Write-Host "Using CMake: $cmake"
 
+# Find vcvars64.bat if environment is not already initialized
+function Init-VcEnvironment {
+  if (-not (Get-Command cl -ErrorAction SilentlyContinue)) {
+    $vcvarsCandidates = @(
+      "${Env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat",
+      "${Env:ProgramFiles}\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat",
+      "${Env:ProgramFiles}\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat",
+      "${Env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat",
+      "${Env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"
+    )
+    foreach ($v in $vcvarsCandidates) {
+      if (Test-Path $v) {
+        Write-Host "Loading MSVC environment from $v..."
+        cmd /c "call `"$v`" && set" | ForEach-Object {
+          if ($_ -match '^(.*?)=(.*)$') {
+            Set-Item -Force -Path "ENV:$($matches[1])" -Value "$($matches[2])"
+          }
+        }
+        break
+      }
+    }
+  }
+}
+
+Init-VcEnvironment
+
 # ---------- submodule init -------------------------------------------------
-# Pulls vendor/RED4ext.SDK and vendor/mod_settings (and mod_settings' own
-# nested deps: spdlog, Detours, RED4ext.SDK fork, cpcmake, archive_xl,
-# red_lib). Recursive so the second-level submodules under vendor/mod_settings
-# also resolve in one pass.
 
 if (-not (Test-Path "vendor\RED4ext.SDK\CMakeLists.txt")) {
   Write-Host "Initializing top-level submodules..."
   git submodule update --init --recursive
   if ($LASTEXITCODE -ne 0) { throw "git submodule update --init --recursive failed." }
 }
-if (-not (Test-Path "vendor\mod_settings\CMakeLists.txt")) {
-  Write-Host "Initializing vendor/mod_settings submodule..."
-  git submodule update --init --recursive vendor/mod_settings
-  if ($LASTEXITCODE -ne 0) { throw "git submodule update --init --recursive vendor/mod_settings failed." }
-}
-# Even if vendor/mod_settings/ is checked out, its own nested submodules
-# (deps/) may not be. Force-init them.
-if (-not (Test-Path "vendor\mod_settings\deps\red4ext.sdk\CMakeLists.txt")) {
-  Write-Host "Initializing vendor/mod_settings nested submodules..."
-  git -C vendor/mod_settings submodule update --init --recursive
-  if ($LASTEXITCODE -ne 0) { throw "nested submodule init in vendor/mod_settings failed." }
-}
 
 # ---------- patched mod_settings.dll ----------------------------------------
-# vendor/mod_settings/ is our fork of jackhumbert/mod_settings with a
-# `ModSettings.hidden` runtime property + empty-category UI filter.
-# Builds via its own CMake project; output lands in
-# vendor/mod_settings/build/Release/mod_settings.dll where deploy.ps1
-# expects it.
 
-$msDll       = "vendor\mod_settings\build\Release\mod_settings.dll"
-$msBuildDir  = "vendor\mod_settings\build"
-$msNeedBuild = -not (Test-Path $msDll)
-if (-not $msNeedBuild) {
-  $msDllTime = (Get-Item $msDll).LastWriteTime
-  $msSrcTimes = Get-ChildItem -Recurse -Path "vendor\mod_settings\src","vendor\mod_settings\include","vendor\mod_settings\CMakeLists.txt" -File -ErrorAction SilentlyContinue |
-    Select-Object -ExpandProperty LastWriteTime
-  if ($msSrcTimes) {
-    $msNewest = ($msSrcTimes | Measure-Object -Maximum).Maximum
-    if ($msNewest -gt $msDllTime) { $msNeedBuild = $true }
-  }
-}
-if ($msNeedBuild) {
+$msBuildDir = "vendor\mod_settings\build"
+$msDllCandidates = @(
+  "vendor\mod_settings\build\Release\mod_settings.dll",
+  "vendor\mod_settings\build\mod_settings.dll"
+)
+$msDll = $msDllCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $msDll -and (Test-Path "vendor\mod_settings\CMakeLists.txt")) {
   Write-Host "Building patched mod_settings.dll (vendor/mod_settings/)..."
-  & $cmake -S vendor/mod_settings -B $msBuildDir -A x64
+  if (Get-Command ninja -ErrorAction SilentlyContinue) {
+    & $cmake -S vendor/mod_settings -B $msBuildDir -G Ninja -DCMAKE_BUILD_TYPE=Release
+  } else {
+    & $cmake -S vendor/mod_settings -B $msBuildDir -A x64
+  }
   if ($LASTEXITCODE -ne 0) { throw "mod_settings CMake configure failed." }
   & $cmake --build $msBuildDir --config Release
   if ($LASTEXITCODE -ne 0) { throw "mod_settings CMake build failed." }
-  if (-not (Test-Path $msDll)) { throw "mod_settings build succeeded but $msDll not found." }
-} else {
-  Write-Host "mod_settings.dll is up to date; skipping mod_settings build."
 }
 
-# ---------- gwheel.dll -----------------------------------------------------
+# ---------- gwheel.dll & tools ---------------------------------------------
 
 Write-Host "Configuring gwheel..."
-& $cmake -S . -B $BuildDir -A x64
+if (Get-Command ninja -ErrorAction SilentlyContinue) {
+  & $cmake -S . -B $BuildDir -G Ninja "-DCMAKE_BUILD_TYPE=$Config"
+} else {
+  & $cmake -S . -B $BuildDir -A x64
+}
 if ($LASTEXITCODE -ne 0) { throw "CMake configure failed." }
 
-Write-Host "Building gwheel..."
+Write-Host "Building gwheel and tools..."
 & $cmake --build $BuildDir --config $Config
 if ($LASTEXITCODE -ne 0) { throw "CMake build failed." }
 
-$dll = Join-Path $BuildDir "gwheel\$Config\gwheel.dll"
+$dll = Join-Path $BuildDir "gwheel\gwheel.dll"
+if (-not (Test-Path $dll)) {
+  $dll = Join-Path $BuildDir "gwheel\$Config\gwheel.dll"
+}
+
 if (Test-Path $dll) {
   Write-Host ""
   Write-Host "Built: $dll"
-  Write-Host "Built: $msDll"
   Write-Host ""
-  Write-Host "Run deploy.ps1 to package or push to a game install."
+  Write-Host "gwheel.dll is ready to deploy to Cyberpunk 2077/red4ext/plugins/gwheel/"
 } else {
   throw "Build succeeded but gwheel.dll was not found at $dll"
 }

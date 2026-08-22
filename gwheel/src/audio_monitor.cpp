@@ -4,8 +4,40 @@
 
 #include <windows.h>
 #include <mmdeviceapi.h>
-#include <audioclient.h>
+#if __has_include(<audioclientactivationparams.h>)
 #include <audioclientactivationparams.h>
+#else
+typedef enum AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS_MODE
+{
+    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE = 0,
+    PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE = 1
+} AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS_MODE;
+
+typedef struct AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS
+{
+    DWORD TargetProcessId;
+    AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS_MODE ProcessLoopbackMode;
+} AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS;
+
+typedef enum AUDIOCLIENT_ACTIVATION_TYPE
+{
+    AUDIOCLIENT_ACTIVATION_TYPE_DEFAULT = 0,
+    AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK = 1
+} AUDIOCLIENT_ACTIVATION_TYPE;
+
+typedef struct AUDIOCLIENT_ACTIVATION_PARAMS
+{
+    AUDIOCLIENT_ACTIVATION_TYPE ActivationType;
+    union
+    {
+        AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS ProcessLoopbackParams;
+    };
+} AUDIOCLIENT_ACTIVATION_PARAMS;
+
+#ifndef VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK
+#define VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK L"VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK"
+#endif
+#endif
 #include <audiopolicy.h>
 #include <endpointvolume.h>
 #include <mmreg.h>

@@ -11,6 +11,7 @@
 #include "audio_monitor.h"
 #include "led.h"
 #include "mod_settings_seed.h"
+#include "dinput_manager.h"
 
 #include <algorithm>
 #include <atomic>
@@ -43,7 +44,7 @@ namespace gwheel
             // softer clutch pedal is easier to modulate. CP2077 has no manual
             // transmission so the clutch axis is otherwise ignored. When the
             // toggle is on, whichever pedal is pressed deeper drives braking.
-            if (config::Current().input.clutchAsBrake)
+            if (config::Current().input.clutchAsBrake && !DInputManager::Instance().HasRudderPedals())
                 f.axes.brake = std::max(f.axes.brake, f.axes.clutch);
 
             return f;

@@ -1,43 +1,52 @@
-# Cyberpunk 2077 — Logitech G-series Steering Wheel Mod
+# Cyberpunk 2077 — Steering Wheel & Flight Controller Mod
 
 **v2.31.0** for Cyberpunk 2077 game patch 2.31.
 
-Drive Cyberpunk 2077 with a Logitech G-series steering wheel. Your wheel handles steering, throttle, brake, and clutch. Force feedback fires from in-game physics (centering as you turn, cornering load, surface texture, collision jolts, slip when you lose grip). Rev-strip LEDs follow real engine RPM. When the in-car radio is on, the rev strip becomes a music visualizer.
+Drive Cyberpunk 2077 with a steering wheel or force feedback flight yoke. Your controller handles steering, throttle, brake, and clutch. Force feedback fires from in-game physics (centering as you turn, cornering load, surface texture, collision jolts, slip when you lose grip). Rev-strip LEDs follow real engine RPM. When the in-car radio is on, the rev strip becomes a music visualizer.
 
-There is no virtual gamepad to install, no XInput shim, no third-party driver. The wheel talks to the game via the official Logitech Steering Wheel SDK (the same one driving sims use).
+There is no virtual gamepad to install, no XInput shim, no third-party driver. The mod communicates natively via DirectInput and the official Logitech Steering Wheel SDK (the same one driving sims use).
 
-## Supported wheels
+## Supported wheels and controllers
 
-The mod was designed to work with any wheel that is compatible with Logitech G Hub.
+The mod was designed to work with Logitech G Hub compatible wheels as well as DirectInput flight yokes and rudder pedals.
 
-I tested with:
+Tested with:
 
 - G923 (Xbox variant)
 - G920
+- MOZA AY210 Force Feedback Base & Flight Yoke
+- Thrustmaster TFRP Rudder Pedals
 
-But theoretically these should all be compatible:
+Supported Logitech wheels:
 
 - WingMan Formula Force, Formula Force GP
 - Driving Force, Driving Force Pro, Driving Force GT
 - Momo Force, Momo Racing
 - G25, G27, G29, G920
 - G923 (Xbox, PS, PC variants)
+- G PRO Racing Wheel
 - Formula Vibration Feedback
 
-The mod auto-detects what hardware your wheel actually has (force feedback motor, rev-strip LEDs, lower-cluster buttons) and only shows the relevant settings.
+Supported DirectInput flight hardware & pedals:
 
-Non-Logitech wheels (Thrustmaster, Fanatec, Moza) are not supported.
+- MOZA Flight Yokes & Bases: AY90, AY210, AB9, MFY
+- MOZA Wheelbases: R3, R5, R9, R12, R16, R21
+- Thrustmaster TFRP & TPR Rudder Pedals
+- Generic DirectInput flight yokes, pedals, and steering wheels
+
+The mod auto-detects what hardware your controller actually has (force feedback motor, rev-strip LEDs, lower-cluster buttons, flight yoke pitch axis, rudder pedals) and only shows the relevant settings.
 
 ## Required mods
 
-1. **[RED4ext](https://www.nexusmods.com/cyberpunk2077/mods/2380)**
-1. **[redscript](https://www.nexusmods.com/cyberpunk2077/mods/1511)**
-1. **[ArchiveXL](https://www.nexusmods.com/cyberpunk2077/mods/4198)**
+1. **[RED4ext](https://www.nexusmods.com/cyberpunk2077/mods/2380)** (v1.25.0 or later)
+1. **[redscript](https://www.nexusmods.com/cyberpunk2077/mods/1511)** (v0.5.24 or later)
+1. **[ArchiveXL](https://www.nexusmods.com/cyberpunk2077/mods/4198)** (v1.14.0 or later)
 1. **[Mod Settings](https://www.nexusmods.com/cyberpunk2077/mods/4885)** v0.2.21 or later
 
 ## Required drivers
 
-- **[Logitech G HUB](https://www.logitech.com/innovation/g-hub.html)**
+- **[Logitech G HUB](https://www.logitech.com/innovation/g-hub.html)** (for Logitech wheels)
+- Controller companion software (e.g. MOZA Cockpit) if required by your hardware
 
 ## Install
 
@@ -54,12 +63,21 @@ If you have wheel buttons configured in your G HUB Cyberpunk profile that overla
 
 I recommend starting with an operating range of 180 to start, since the rotation will match the animation you see in 1st person view inside of a car. I tend to like it a bit wider to help mitigate fishtailing.
 
+## Diagnostic Tool (`input_probe`)
+
+A standalone diagnostic tool is included in the build (`tools/input_probe/input_probe.exe`). You can run:
+```cmd
+input_probe.exe once
+```
+to verify attached DirectInput devices, detected roles (Flight Yoke, Rudder Pedals, Racing Wheel), axis positions, and force feedback capabilities without launching the game.
+
 ## Troubleshooting
 
 - **Wheel detected but the car doesn't move.** Make sure RED4ext is installed and current.
 - **Settings page is missing.** Mod Settings or ArchiveXL aren't installed correctly. The wheel will still work on defaults.
 - **Three orphan toggles named `hasFfbHardware` / `hasRevLeds` / `hasRightCluster` show up in settings.** Vortex installed stock Mod Settings on top of the patched build that ships with this mod. Re-deploy in Vortex and let this mod win the file conflict.
-- **Doubled keypresses on D-pad or A/B/X/Y.** G HUB and this mod are both binding the same keys. Reset the wheel-button entries in your G HUB Cyberpunk profile back to their default bindings.
+- **Doubled keypresses on D-pad or A/B/X/Y.** G HUB (or companion app) and this mod are both binding the same keys. Reset the wheel-button entries in your companion profile back to their default bindings.
+- **Overlapping inputs with keyboard.** Keyboard WASD can override steering controls if pressed simultaneously.
 
 ## Credits
 
@@ -70,4 +88,4 @@ I recommend starting with an operating range of 180 to start, since the rotation
 
 ## Reporting issues
 
-Include your wheel model, Cyberpunk patch version, RED4ext version, and your most recent `red4ext/logs/gwheel-*.log` file.
+Include your wheel/controller model, Cyberpunk patch version, RED4ext version, and your most recent `red4ext/logs/gwheel-*.log` file.
