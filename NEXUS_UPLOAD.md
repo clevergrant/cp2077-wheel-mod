@@ -7,7 +7,7 @@ Reference for filling out the Nexus mod-upload form for v2.31.0. Settings on thi
 | Field | Value |
 | --- | --- |
 | **Mod Name** | `Logitech G-series Steering Wheel` |
-| **Version** | `2.31.0` |
+| **Version** | `3.3.0` |
 | **Game** | Cyberpunk 2077 |
 | **Category** | Vehicles (or Gameplay if Vehicles isn't accepted; this mod doesn't fit Modders Resources) |
 | **Author** | Grant Perdue |
@@ -78,15 +78,15 @@ In the **Credits** section, list:
 Upload the FOMOD zip:
 
 ```
-dist/gwheel-2.31.0.zip
+dist/direct_wheel-3.3.0.zip
 ```
 
 In the file's metadata:
 
 - **File name**: `Logitech G-series Wheel Mod`
-- **File version**: `2.31.0`
-- **Category**: `Main Files`
-- **Description**: `Full mod, FOMOD installer. v2.31.0 for game patch 2.31.`
+- **File version**: `3.3.0`
+- **Update version**: `3.3.0`
+- **Description**: `Full mod, FOMOD installer. v3.3.0 for game patch 2.31. Adds clutch pedal as analog flight brake.`
 
 ## Images (need at least one)
 
@@ -118,7 +118,7 @@ TROUBLESHOOTING TIPS — read before reporting an issue:
    to match the current Cyberpunk patch. Check the RED4ext Nexus page.
 
 4. Bug reports must include: your wheel model, Cyberpunk patch version,
-   RED4ext version, and the contents of red4ext/logs/gwheel-*.log
+   RED4ext version, and the contents of red4ext/logs/direct_wheel-*.log
    (most recent file). Without those four pieces of info I cannot help.
 
 5. Non-Logitech wheels (Thrustmaster, Fanatec, Moza) are not supported.
@@ -131,3 +131,4 @@ Nexus has a separate Changelog tab. Paste [CHANGELOG.md](CHANGELOG.md). For futu
 ## Nexus deep-link install ("Mod Manager Download")
 
 The green "Mod Manager Download" button on the file page is what the description tells users to click. Vortex catches the `nxm://` protocol handler the button generates. There's no special configuration needed on your end; Nexus generates this automatically once the file is uploaded and approved.
+

@@ -1,0 +1,235 @@
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <string>
+#include <string_view>
+
+struct DIJOYSTATE2;  // forward-declare for AxisMap resolver
+
+namespace direct_wheel::config
+{
+    struct Input
+    {
+        bool        enabled = true;
+        bool        clutchAsBrake = false;
+        bool        invertSteering = false;
+        bool        invertThrottle = false;
+        bool        invertBrake = false;
+        bool        invertClutch = false;
+        float       steeringDeadzoneDegrees = 0.0f;
+        std::string responseCurve = "default"; // default | subdued | sharp
+        int32_t     speedSensitiveSteeringPct = 45; // 0=off, 50=1.5x at 100mph, 100=2x max
+        int32_t     steeringCurve25 = 50;  // output at 25% input
+        int32_t     steeringCurve50 = 71;  // output at 50% input
+        int32_t     steeringCurve75 = 86;  // output at 75% input
+        float       maxWheelTurnDeg = 0.f;            // 0 = don't override
+        float       wheelTurnMaxAddPerSecond = 0.f;   // 0 = don't override (legacy)
+        float       wheelTurnMaxSubPerSecond = 0.f;   // 0 = don't override (legacy)
+
+
+    };
+
+    struct Ffb
+    {
+        bool    enabled = true;
+        bool    debugLogging = false;
+
+        // Wheel torque, pushed to G HUB via LogiSetPreferredControllerProperties
+        // (overallGain). When "Apply Settings from Game" is checked in G HUB
+        // (the default), G HUB greys out its own Torque slider and expects
+        // the game to drive this value. When unchecked, G HUB ignores our
+        // Set and uses its slider value. 100 = full, 0 = off.
+        int32_t torquePct = 100;
+
+        // Physics-model self-centering. Wheel is free at rest; spring engages
+        // and active torque builds with speed². Shape + cruise speed + spring
+        // baseline are derived per-car from WheeledPhysics. The knobs below
+        // are the user-facing taste scalars layered on top:
+        //
+        // stationaryThresholdMps: below this, all centering forces are off
+        //   so the wheel rests wherever the driver leaves it.
+        // yawFeedbackPct: additive spring-stiffness bonus during rotation,
+        //   normalised against the car's own turnRate. Pure preference.
+        // activeTorqueStrengthPct: 0..100 gain on the directional push-back
+        //   constant force. Peak is shaped (humped sqrt curve over deflection,
+        //   lateral-accel proxy, grip-factor lightening past the yaw limit).
+        float   stationaryThresholdMps  = 0.5f;
+        int32_t yawFeedbackPct          = 15;
+        int32_t springNonLinearityPct   = 0;
+        int32_t activeTorqueStrengthPct = 45;
+
+        // Per-effect strength sliders (0..100). Allow the user to
+        // individually scale each DirectInput FFB effect type.
+        int32_t constantForcePct = 50;
+        int32_t springForcePct   = 15;
+        int32_t damperForcePct   = 45;
+        int32_t frictionForcePct = 25;
+        int32_t sineForcePct     = 10;
+        int32_t joltForcePct     = 40;
+    };
+
+    struct PerVehicle
+    {
+        float steeringMultiplier = 1.0f;
+        int32_t responseDelayMs = 20;
+    };
+
+    struct Handshake
+    {
+        // Play the direct_wheel handshake (LED sweep → 4 triplets + synced LED
+        // flashes → centering spring with LED breath pulse) on wheel
+        // connect. Installer-level choice; persisted to config.json so
+        // it survives restarts until changed.
+        bool playOnStart = true;
+    };
+
+    struct Led
+    {
+        // Master toggle for the wheel's rev-strip LEDs (G29/G920/G923 etc.).
+        // When off, the plugin never calls LogiPlayLeds — G HUB's own
+        // profile drives them (or they stay dark).
+        bool enabled = true;
+
+        // When true AND system audio is playing, the LED bar tracks a
+        // dynamic-range-normalised audio envelope instead of vehicle
+        // speed. Silence (below the WASAPI loopback noise gate) falls
+        // back to rev-strip automatically.
+        bool visualizerWhileMusic = true;
+    };
+
+    // DirectInput axis mapping. Each field names which DIJOYSTATE2 member
+    // to read for that logical input. Valid values:
+    //   "lX", "lY", "lZ", "lRx", "lRy", "lRz", "slider0", "slider1"
+    // Defaults match Logitech G923/G29/G920 out of the box.
+    // Moza (R3/R5/R9) with pedals via base typically uses lY for throttle.
+    struct AxisMap
+    {
+        std::string steer    = "lX";
+        std::string throttle = "lZ";
+        std::string brake    = "lRz";
+        std::string clutch   = "slider0";
+
+        // Optional device name overrides (case-insensitive substring match).
+        // When non-empty, the plugin selects the first device whose product
+        // name contains this string, bypassing the FFB-score heuristic.
+        //
+        // wheelDeviceName  — device that provides the steering axis + FFB.
+        //   Example: "KS Wheel", "Moza R12", "G923".
+        //
+        // pedalDeviceName  — separate USB device that provides
+        //   throttle/brake/clutch axes. When set, steer + FFB still come
+        //   from the wheel device; pedal axes are read from this device.
+        //   Example: "G Pro Racing Pedals", "Logitech G Pro", "FANATEC".
+        //   Leave empty (default) to read all axes from the wheel device.
+        std::string wheelDeviceName;
+        std::string pedalDeviceName;
+
+        // Resolve a named axis to a raw LONG value from a DIJOYSTATE2.
+        static long Read(const DIJOYSTATE2& js, const std::string& axisName);
+    };
+
+    struct Music
+    {
+        // Target process name for per-process audio capture. Empty =
+        // capture the game's own process tree (direct_wheel.dll lives
+        // inside Cyberpunk2077.exe, so we use GetCurrentProcessId).
+        // This isolates the visualizer to just the game's audio
+        // (radio + engine + SFX) and rejects anything else on the
+        // system — Spotify tabs, Discord, browser audio — that
+        // otherwise contaminated the system-wide loopback.
+        //
+        // Non-empty = an advanced override that points the loopback
+        // at some OTHER app instead, for setups where the user runs
+        // a separate music source alongside the game.
+        // Examples: "Spotify.exe", "firefox.exe", "chrome.exe".
+        // Case-insensitive match on the executable filename. If the
+        // named process isn't running when the plugin starts, we
+        // fall back to system-wide loopback with a warning.
+        std::string processName;
+    };
+
+    struct Config
+    {
+        int32_t     version = 4;
+        Input       input;
+        Ffb         ffb;
+        Handshake   handshake;
+        Led         led;
+        Music       music;
+        AxisMap     axes;
+        PerVehicle  car        = { 1.0f, 20 };
+        PerVehicle  motorcycle = { 1.2f, 10 };
+        PerVehicle  truck      = { 0.8f, 40 };
+        PerVehicle  van        = { 0.9f, 30 };
+
+        // Per-physical-input action binding. Indexed by input_bindings::
+        // PhysicalInput; value is input_bindings::Action as int32_t. Array
+        // size is hardcoded at 20 to match PhysicalInput::kCount. Keep in
+        // sync if we add wheel controls.
+        static constexpr size_t kBindingCount = 30;
+        std::array<int32_t, kBindingCount> bindings{};
+    };
+
+    // Read the published snapshot. Non-blocking; safe from any thread.
+    Config Current();
+
+    // Load config.json from the plugin's install dir. Falls back to defaults
+    // if the file doesn't exist or fails to parse (a warning is logged in
+    // that case). Idempotent; safe to call multiple times.
+    void Load();
+
+    // Serialize the current snapshot as a JSON string. Used by redscript at
+    // Settings-page init time to hydrate the page with the persisted values.
+    std::string ReadAsJson();
+
+    // Per-field setters. Each one swaps the snapshot atomically and writes
+    // the updated config back to disk.
+    void SetInputEnabled(bool v);
+    void SetClutchAsBrake(bool v);
+    void SetInvertSteering(bool v);
+    void SetInvertThrottle(bool v);
+    void SetInvertBrake(bool v);
+    void SetInvertClutch(bool v);
+    void SetSteeringDeadzoneDegrees(float v);
+    void SetResponseCurve(std::string_view v);
+
+    void SetFfbEnabled(bool v);
+    void SetFfbDebugLogging(bool v);
+    void SetFfbTorquePct(int32_t v);
+
+    void SetStationaryThresholdMps(float v);
+    void SetYawFeedbackPct(int32_t v);
+    void SetSpringNonLinearityPct(int32_t v);
+    void SetActiveTorqueStrengthPct(int32_t v);
+    void SetConstantForcePct(int32_t v);
+    void SetSpringForcePct(int32_t v);
+    void SetDamperForcePct(int32_t v);
+    void SetFrictionForcePct(int32_t v);
+    void SetSineForcePct(int32_t v);
+    void SetJoltForcePct(int32_t v);
+    void SetSpeedSensitiveSteeringPct(int32_t v);
+    void SetSteeringCurve25(int32_t v);
+    void SetSteeringCurve50(int32_t v);
+    void SetSteeringCurve75(int32_t v);
+
+
+    void SetHandshakePlayOnStart(bool v);
+
+    void SetLedEnabled(bool v);
+    void SetLedVisualizerWhileMusic(bool v);
+
+    void SetMusicProcessName(std::string_view v);
+
+    // Single-input binding: inputId in [0, kBindingCount), action as the
+    // Action int from input_bindings.h.
+    void SetInputBinding(int32_t inputId, int32_t action);
+
+    // Axis map setters
+    void SetAxisSteer(std::string_view v);
+    void SetAxisThrottle(std::string_view v);
+    void SetAxisBrake(std::string_view v);
+    void SetAxisClutch(std::string_view v);
+    void SetWheelDeviceName(std::string_view v);
+    void SetPedalDeviceName(std::string_view v);
+}

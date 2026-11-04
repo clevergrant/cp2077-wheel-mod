@@ -1,9 +1,9 @@
-# Package or deploy gwheel for testing.
+# Package or deploy direct_wheel for testing.
 #
 # Two modes:
 #
 #   Zip mode (default):
-#     Produces dist/gwheel-<version>.zip laid out the way the FOMOD expects.
+#     Produces dist/direct_wheel-<version>.zip laid out the way the FOMOD expects.
 #     Drop that zip on Vortex via File -> Install from file.
 #     Example:
 #       powershell -ExecutionPolicy Bypass -File deploy.ps1
@@ -16,7 +16,7 @@
 #
 # Common flags:
 #   -Config <Debug|Release|RelWithDebInfo>   Which build config to package.
-#   -BuildDir <path>                          Where gwheel.dll lives (default "build").
+#   -BuildDir <path>                          Where direct_wheel.dll lives (default "build").
 #   -Clean                                    Wipe prior artifacts before deploying.
 #   -NoBuild                                  Skip invoking build.ps1 even if the DLL is stale.
 
@@ -45,7 +45,7 @@ function Fail($msg)    {
 
 # ---------- version ---------------------------------------------------------
 
-$version = "2.31.0"
+$version = "3.4.1"
 try {
   $modInfo = Get-Content -Raw "mod_info.json" | ConvertFrom-Json
   if ($modInfo.version) { $version = $modInfo.version }
@@ -57,12 +57,12 @@ Info "Version: $version"
 # ---------- pre-flight ------------------------------------------------------
 
 $redsFiles = @(
-  "gwheel_reds\gwheel_natives.reds",
-  "gwheel_reds\gwheel_settings.reds",
-  "gwheel_reds\gwheel_mount.reds",
-  "gwheel_reds\gwheel_events.reds",
-  "gwheel_reds\gwheel_surface.reds",
-  "gwheel_reds\gwheel_vehicle_signals.reds"
+  "direct_wheel_reds\direct_wheel_natives.reds",
+  "direct_wheel_reds\direct_wheel_settings.reds",
+  "direct_wheel_reds\direct_wheel_mount.reds",
+  "direct_wheel_reds\direct_wheel_events.reds",
+  "direct_wheel_reds\direct_wheel_surface.reds",
+  "direct_wheel_reds\direct_wheel_vehicle_signals.reds"
 )
 foreach ($r in $redsFiles) {
   if (-not (Test-Path $r)) { Fail "Missing redscript source: $r" }
@@ -84,13 +84,11 @@ foreach ($f in $fomodConfigFiles) {
   if (-not (Test-Path $f)) { Fail "Missing FOMOD config fragment: $f" }
 }
 
-# Patched mod_settings.dll fork (vendor/mod_settings/). Built by build.ps1
-# alongside gwheel.dll; the existence check happens after Invoke-Build below.
-$patchedModSettingsDll = Join-Path $repoRoot "vendor\mod_settings\build\Release\mod_settings.dll"
+
 
 # ---------- build (if needed) ----------------------------------------------
 
-$dllPath = Join-Path $BuildDir "gwheel\$Config\gwheel.dll"
+$dllPath = Join-Path $BuildDir "direct_wheel\$Config\direct_wheel.dll"
 
 function Invoke-Build {
   if (-not (Test-Path "build.ps1")) { Fail "build.ps1 missing - can't build." }
@@ -107,7 +105,7 @@ if (-not (Test-Path $dllPath)) {
 } elseif (-not $NoBuild) {
   # Rebuild if any source is newer than the DLL.
   $dllTime = (Get-Item $dllPath).LastWriteTime
-  $srcTimes = Get-ChildItem -Recurse -Path "gwheel\src","gwheel\include","gwheel\CMakeLists.txt","CMakeLists.txt" -File |
+  $srcTimes = Get-ChildItem -Recurse -Path "direct_wheel\src","direct_wheel\include","direct_wheel\CMakeLists.txt","CMakeLists.txt" -File |
     Select-Object -ExpandProperty LastWriteTime
   $newest = ($srcTimes | Measure-Object -Maximum).Maximum
   if ($newest -gt $dllTime) {
@@ -121,13 +119,7 @@ if (-not (Test-Path $dllPath)) {
 $dllSize = (Get-Item $dllPath).Length
 Info "Using DLL: $dllPath ($dllSize bytes)"
 
-# Sanity-check the patched mod_settings.dll. build.ps1 should have produced
-# it as a side effect; if it's missing now, build.ps1 has a bug.
-if (-not (Test-Path $patchedModSettingsDll)) {
-  Fail "Patched mod_settings.dll missing at $patchedModSettingsDll after build. build.ps1 should have produced it."
-}
-$msDllSize = (Get-Item $patchedModSettingsDll).Length
-Info "Using patched mod_settings.dll: $patchedModSettingsDll ($msDllSize bytes)"
+
 
 # ---------- clean -----------------------------------------------------------
 
@@ -178,8 +170,8 @@ if ($Game) {
   }
 
   # Deploy.
-  $pluginDir = Join-Path $Game "red4ext\plugins\gwheel"
-  $scriptDir = Join-Path $Game "r6\scripts\gwheel"
+  $pluginDir = Join-Path $Game "red4ext\plugins\direct_wheel"
+  $scriptDir = Join-Path $Game "r6\scripts\direct_wheel"
 
   if ($Clean) {
     if (Test-Path $pluginDir) { Remove-Item -Recurse -Force $pluginDir; Info "Removed $pluginDir" }
@@ -189,32 +181,12 @@ if ($Game) {
   New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
   New-Item -ItemType Directory -Force -Path $scriptDir | Out-Null
 
-  Copy-Item -Force $dllPath (Join-Path $pluginDir "gwheel.dll")
-  Info "Deployed DLL -> $(Join-Path $pluginDir 'gwheel.dll')"
+  Copy-Item -Force $dllPath (Join-Path $pluginDir "direct_wheel.dll")
+  Info "Deployed DLL -> $(Join-Path $pluginDir 'direct_wheel.dll')"
 
-  # Patched mod_settings DLL: $patchedModSettingsDll resolved + existence-checked
-  # in pre-flight above. Overwrite the user's existing mod_settings.dll in place;
-  # the patch is API-compatible with upstream so other mods using mod_settings
-  # keep working.
-  $modSettingsTarget = Join-Path $Game "red4ext\plugins\mod_settings\mod_settings.dll"
-  $modSettingsDir    = Split-Path $modSettingsTarget -Parent
-  if (-not (Test-Path $modSettingsDir)) {
-    Warn "mod_settings folder doesn't exist at $modSettingsDir - install jackhumbert/mod_settings first, then re-run."
-  } else {
-    Copy-Item -Force $patchedModSettingsDll $modSettingsTarget
-    Info "Deployed patched mod_settings.dll -> $modSettingsTarget"
-  }
 
-  # Logitech Gaming Software / G HUB runtime check. The Logitech SDK the DLL
-  # is built against talks to either LGS or G HUB through a shared user-mode
-  # service; without it LogiSteeringInitialize will fail in-process and the
-  # pump thread will log retry warnings.
-  $ghub = Get-Process -Name "lghub","LCore" -ErrorAction SilentlyContinue
-  if (-not $ghub) {
-    Warn "Neither G HUB (lghub.exe) nor LGS (LCore.exe) is running. Start one before launching CP2077."
-  } else {
-    Info "Logitech runtime detected: $($ghub[0].ProcessName)"
-  }
+
+  # (Legacy: We used to check for Logitech G HUB here, but the mod now uses raw DirectInput and works without it).
 
   foreach ($r in $redsFiles) {
     $dest = Join-Path $scriptDir (Split-Path $r -Leaf)
@@ -273,12 +245,10 @@ if ($Game) {
   Write-Host "Next steps:" -ForegroundColor Cyan
   Write-Host '  1. Launch Cyberpunk 2077. First launch after a .reds change is slow (30 to 60 seconds) due to recompile.'
   Write-Host '  2. Check logs for load confirmation:'
-  Write-Host ("       " + (Join-Path $Game 'red4ext\logs\gwheel-*.log'))
-  Write-Host ("     Look for:   [gwheel] loaded v" + $version)
-  Write-Host '                 [gwheel] Logitech Steering Wheel SDK v...'
-  Write-Host '                 [gwheel] wheel bound at SDK slot 0: "G923 ..."'
-  Write-Host '                 [gwheel] firing gwheel handshake (LED sweep + 4 triplets + centering breath)'
-  Write-Host '                 [gwheel:hook] UpdateVehicleCameraInput fired for the first time (live-hook signal once you enter a vehicle)'
+  Write-Host ("       " + (Join-Path $Game 'red4ext\logs\direct_wheel-*.log'))
+  Write-Host ("     Look for:   [direct_wheel] loaded v" + $version)
+  Write-Host '                 [direct_wheel] wheel bound at SDK slot 0: "G923 ..."'
+  Write-Host '                 [direct_wheel:hook] UpdateVehicleCameraInput fired for the first time (live-hook signal once you enter a vehicle)'
   Write-Host '     If the game fails to launch with an RED4ext MessageBox, the UpdateVehicleCameraInput hash did not resolve - update RED4ext itself (its address database ships per game patch).'
   Write-Host '  3. Check redscript compile log (if the Settings page or mount/menu wrappers break):'
   Write-Host ("       " + (Join-Path $Game 'r6\cache\modded\final.redscripts.log'))
@@ -292,28 +262,29 @@ if ($Game) {
 
 $stagingDir = Join-Path $repoRoot "staging"
 $distDir    = Join-Path $repoRoot "dist"
-$zipPath    = Join-Path $distDir "gwheel-$version.zip"
+$zipPath    = Join-Path $distDir "direct_wheel-$version.zip"
 
 if (Test-Path $stagingDir) { Remove-Item -Recurse -Force $stagingDir }
 New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
 New-Item -ItemType Directory -Force -Path $distDir    | Out-Null
 
-# Layout for the FOMOD - source paths match what ModuleConfig.xml references.
-New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "build")         | Out-Null
+# Create standard game directory layout for manual installs.
+New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "red4ext\plugins\direct_wheel") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "r6\scripts\direct_wheel")      | Out-Null
+
+# FOMOD metadata and configs (Vortex uses this).
 New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "fomod")         | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "fomod_configs") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "gwheel_reds")   | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $stagingDir "mod_settings")  | Out-Null
 
-Copy-Item -Force $dllPath                          (Join-Path $stagingDir "build\gwheel.dll")
-Copy-Item -Force $patchedModSettingsDll            (Join-Path $stagingDir "mod_settings\mod_settings.dll")
+Copy-Item -Force $dllPath                          (Join-Path $stagingDir "red4ext\plugins\direct_wheel\direct_wheel.dll")
+
 Copy-Item -Force "fomod\info.xml"                  (Join-Path $stagingDir "fomod\info.xml")
 Copy-Item -Force "fomod\ModuleConfig.xml"          (Join-Path $stagingDir "fomod\ModuleConfig.xml")
 foreach ($c in $fomodConfigFiles) {
   Copy-Item -Force $c (Join-Path $stagingDir $c)
 }
 foreach ($r in $redsFiles) {
-  Copy-Item -Force $r (Join-Path $stagingDir (Split-Path $r -Leaf | ForEach-Object { "gwheel_reds\$_" }))
+  Copy-Item -Force $r (Join-Path $stagingDir (Split-Path $r -Leaf | ForEach-Object { "r6\scripts\direct_wheel\$_" }))
 }
 
 # Include README + CHANGELOG as top-level files so Vortex shows them.
@@ -334,3 +305,24 @@ Write-Host "  Deploy (Vortex auto-prompts), then launch the game."
 Write-Host ""
 Write-Host "For fast dev iteration, skip Vortex:" -ForegroundColor Cyan
 Write-Host "  .\deploy.ps1 -Game `"<path-to-cyberpunk-install>`""
+
+# ============================================================================
+# Flight bridge addon zip (optional, requires Let There Be Flight)
+# ============================================================================
+$bridgeFile = "direct_wheel_reds\direct_wheel_flight_bridge.reds"
+if (Test-Path $bridgeFile) {
+  $bridgeStagingDir = Join-Path $repoRoot "staging_flight_bridge"
+  $bridgeZipPath    = Join-Path $distDir "direct_wheel_flight_bridge-$version.zip"
+
+  if (Test-Path $bridgeStagingDir) { Remove-Item -Recurse -Force $bridgeStagingDir }
+  New-Item -ItemType Directory -Force -Path (Join-Path $bridgeStagingDir "r6\scripts\direct_wheel") | Out-Null
+
+  Copy-Item -Force $bridgeFile (Join-Path $bridgeStagingDir "r6\scripts\direct_wheel\direct_wheel_flight_bridge.reds")
+
+  if (Test-Path $bridgeZipPath) { Remove-Item -Force $bridgeZipPath }
+  Compress-Archive -Path (Join-Path $bridgeStagingDir "*") -DestinationPath $bridgeZipPath -Force
+
+  $bridgeZipSize = [Math]::Round((Get-Item $bridgeZipPath).Length / 1024, 1)
+  Ok "Flight bridge addon: $bridgeZipPath ($bridgeZipSize KB)"
+  Remove-Item -Recurse -Force $bridgeStagingDir
+}
